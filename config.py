@@ -58,6 +58,13 @@ args["DECODE_TYPE"] = "HYBRID"  # HYBRID ATTN TFATTN CTC
 args["EVAL_LRS2_MODEL_FILE"] = None#/home/yxwang/train-step_0262-wer_0.893.ckpt
 
 """
+    For me
+"""
+args['dropout_features'] = 0.1
+args['frontend'] = "resnet18"
+
+
+"""
     =====Default Parameters=====
 """
 # preprocessing

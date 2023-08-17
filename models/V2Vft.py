@@ -103,3 +103,5 @@ class VisFeatureExtractionModel(nn.Module):
         x = self.MoCoModel(x) #464*2048
         return x
         # return shape: (B*N) x 512
+
+        # refer models/moco_visual_frontend.py

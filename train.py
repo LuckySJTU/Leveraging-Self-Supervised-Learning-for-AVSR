@@ -57,7 +57,7 @@ class LRS2Lightning(pl.LightningDataModule):
 
 
 class V2V(pl.LightningModule):
-    def __init__(self, dropout_features, frontend, output_size):
+    def __init__(self, dropout_features, frontend, output_size, reqInpLen, ALPHA, eosIdx, spaceIdx):
         super(V2V, self).__init__()
         self.feature_extractor = VisFeatureExtractionModel(frontend)
         self.dropout_feats = nn.Dropout(p=dropout_features)
@@ -90,91 +90,58 @@ class V2V(pl.LightningModule):
             emb_drop=0,
         )
 
+        self.CTCLossFunction = [SmoothCTCLoss(output_size, blank=0)]
+        self.CELossFunction = [SmoothCrossEntropyLoss()]
+        self.reqInpLen = reqInpLen
+        self.alpha = ALPHA
+        self.eosIdx = eosIdx
+        self.spaceIdx = spaceIdx
 
-    def forward(self, source, sizes, targetinBatch, targetoutBatch, target_lengths):
+
+    def forward(self, source, sizes, target_lengths, targetinBatch=None):
         frames = source.shape[1]
-        if self.avhubert:
-            x=self.backbone.forward_features(source.permute(0,2,1,3,4),'video')
-            # x=x.permute(0,2,1)
-        else:
-            features = self.backbone.feature_extractor(source)  # (B*N) x D
-            features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1)     # B x D x N
-            x = self.backbone.dropout_feats(features)
-            # x = self.backbone.feature_aggregator(x)     # B x D x N
-            # x = self.backbone.dropout_agg(x)
-        cls = None
+        features = self.feature_extractor(source)  # (B*N) x D
+        features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1)     # B x D x N
+        x = self.dropout_feats(features)
+        # x = self.backbone.feature_aggregator(x)     # B x D x N
+        # x = self.backbone.dropout_agg(x)
         vsr = None
         att = None
-        if self.wb and word_boundary:
-            word_boundary = torch.tensor(word_boundary,device=x.device)
-            word_boundary = word_boundary.unsqueeze(2)
-            x = x.permute(0,2,1)
-            x = torch.dstack((x,word_boundary))
-            x = x.permute(0,2,1)
 
-        if self.LRW:
-            if self.cls_type == "TCN":
-                cls = self.tcn(x)
-                cls = torch.mean(cls, -1)
-                cls = self.cls_proj(cls)
-            elif self.cls_type=="Linear":
-                cls = self.cls_proj(torch.mean(x,-1))
-            elif self.cls_type=="MSTCN":
-                cls = self.mstcn(x)
-                cls = sum(cls)
-                cls = torch.mean(cls,-1)
-                cls = self.cls_proj(cls)
-            else:
-                # default GRU
-                h, _ = self.gru(x.permute(0, 2, 1))
-                cls = self.cls_proj(self.dropout(h)).mean(1)
+        inputLenBatch = torch.tensor(sizes, dtype=torch.int64, device=source.device)
+        inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
+        # vsr, _ = self.biGRU(x.permute(0, 2, 1))
+        # vsr = self.dropout(vsr)
+        # vsr = self.vsr_proj(vsr)
+
+        # vsr = self.vsr_proj(x.permute(0,2,1))
+
+        # vsr = self.vsr_bert(inputs_embeds=x.permute(0,2,1)) # batch*512*length
+        # vsr = vsr.logits
+
+        teacher_forcing = 1 if targetinBatch is not None else 0
         
-        if self.vsr:
-            # vsr, _ = self.biGRU(x.permute(0, 2, 1))
-            # vsr = self.dropout(vsr)
-            # vsr = self.vsr_proj(vsr)
+        vsr, att, att_seq, dec_state = self.att_deocder(
+            x.permute(0,2,1), 
+            torch.tensor(sizes,device=x.device), 
+            max(target_lengths), 
+            tf_rate=teacher_forcing, 
+            teacher=targetinBatch,
+        )
+        # att = self.att_proj(att)
 
-            # vsr = self.vsr_proj(x.permute(0,2,1))
-
-            # vsr = self.vsr_bert(inputs_embeds=x.permute(0,2,1)) # batch*512*length
-            # vsr = vsr.logits
-
-            teacher_forcing = 1 if targets is not None else 0
-            teach = None
-            if teacher_forcing:
-                # teach: <bos>Sentence<eos>, but only use <bos>Sentence
-                # target: Sentence<eos>
-                teach = torch.zeros((targets.shape[0],targets.shape[1]+1,self.vocab_size),dtype=torch.long,device=targets.device)
-                for i in range(targets.shape[0]):
-                    teach[i,1:,:] = F.one_hot(targets[i].long(), num_classes=self.vocab_size)
-                teach[:,0,0] = 1
-            
-            vsr, att, att_seq, dec_state = self.att_deocder(
-                x.permute(0,2,1), 
-                torch.tensor(sizes,device=x.device), 
-                max(target_lengths), 
-                tf_rate=teacher_forcing, 
-                teacher=teach,
-            )
-            # att = self.att_proj(att)
-
-            # encoder_out = {"encoder_out": [x.permute(2,0,1)], "encoder_padding_mask": padding_mask}
-            # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
+        # encoder_out = {"encoder_out": [x.permute(2,0,1)], "encoder_padding_mask": padding_mask}
+        # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
 
 
-        return vsr, cls, att
+        return inputLenBatch, (vsr, att)
 
 
     def training_step(self, batch, batch_idx):
         inputBatch, targetinBatch, targetoutBatch, targetLenBatch = batch
-        Alpha = self.trainParams["Alpha"]
+        Alpha = self.alpha
+        inputBatch = (None, None, inputBatch[2].float(), inputBatch[3].int())
 
-        if self.trainParams['modal'] == "AO":
-            inputBatch = (inputBatch[0].float(), inputBatch[1], None, None)
-        elif self.trainParams['modal'] == "VO":
-            inputBatch = (None, None, inputBatch[2].float(), inputBatch[3].int())
-        else:
-            inputBatch = (inputBatch[0].float(), inputBatch[1], inputBatch[2].float(), inputBatch[3].int())
         targetinBatch = targetinBatch.int()
         targetoutBatch = targetoutBatch.int()
         targetLenBatch = targetLenBatch.int()
@@ -192,23 +159,19 @@ class V2V(pl.LightningModule):
         self.log("info/train_celoss", celoss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("info/train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
 
-        predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0].detach(), inputLenBatch, self.trainParams["eosIx"])
+        predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0].detach(), inputLenBatch, self.eosIdx)
         c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
         self.log("CER/train_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.trainParams["spaceIx"])
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.spaceIdx)
         self.log("info/train_WER", w_edits / w_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         inputBatch, targetinBatch, targetoutBatch, targetLenBatch = batch
-        Alpha = self.trainParams["Alpha"]
+        Alpha = self.alpha
 
-        if self.valParams['modal'] == "AO":
-            inputBatch = (inputBatch[0].float(), inputBatch[1], None, None)
-        elif self.valParams['modal'] == "VO":
-            inputBatch = (None, None, inputBatch[2].float(), inputBatch[3].int())
-        else:
-            inputBatch = (inputBatch[0].float(), inputBatch[1], inputBatch[2].float(), inputBatch[3].int())
+        inputBatch = (None, None, inputBatch[2].float(), inputBatch[3].int())
+
         targetinBatch = targetinBatch.int()
         targetoutBatch = targetoutBatch.int()
         targetLenBatch = targetLenBatch.int()
@@ -227,16 +190,16 @@ class V2V(pl.LightningModule):
         self.log("info/val_celoss", celoss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("info/val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
 
-        predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0], inputLenBatch, self.valParams["eosIx"])
+        predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0], inputLenBatch, self.eosIdx)
         c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
         self.log("CER/val_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.valParams["spaceIx"])
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.spaceIdx)
         self.log("info/val_WER", w_edits / w_count, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
 
-        predictionBatch, predictionLenBatch = teacher_forcing_attention_decode(outputBatch[1], self.valParams["eosIx"])
+        predictionBatch, predictionLenBatch = teacher_forcing_attention_decode(outputBatch[1], self.eosIdx)
         c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
         self.log("CER/val_TF_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.valParams["spaceIx"])
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.spaceIdx)
         self.log("info/val_TF_WER", w_edits / w_count, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
 
     def get_progress_bar_dict(self):
@@ -274,25 +237,15 @@ def main():
     torch.set_num_threads(args["NUM_CPU_CORE"])
     LRS2Dataloader = LRS2Lightning()
     LRS2Dataloader.setup('fit')
-    modelargs = (args["DMODEL"], args["TX_ATTENTION_HEADS"], args["TX_NUM_LAYERS"], args["PE_MAX_LENGTH"], args["AUDIO_FEATURE_SIZE"],
-                 args["VIDEO_FEATURE_SIZE"], args["TX_FEEDFORWARD_DIM"], args["TX_DROPOUT"], args["CHAR_NUM_CLASSES"])
-    model = V2V(0.1, "resnet18", 40)
-    # loading the pretrained weights
-    if not args["MODAL"] == "AV" and args["TRAIN_LRS2_MODEL_FILE"] is not None:
-        stateDict = torch.load(args["TRAIN_LRS2_MODEL_FILE"], map_location="cpu")['state_dict']
-        model.load_state_dict(stateDict, strict=False)
-    if args["MODAL"] == "AV" and args["TRAINED_AO_FILE"] is not None and args["TRAINED_VO_FILE"] is not None:
-        AOstateDict = torch.load(args["TRAINED_AO_FILE"])['state_dict']
-        stateDict = torch.load(args["TRAINED_VO_FILE"])['state_dict']
-        for k in list(AOstateDict.keys()):
-            if not (k.startswith('audioConv') or k.startswith('wav2vecModel')):
-                del AOstateDict[k]
-
-        for k in list(stateDict.keys()):
-            if not (k.startswith('videoConv') or k.startswith('visualModel')):
-                del stateDict[k]
-        stateDict.update(AOstateDict)
-        model.load_state_dict(stateDict, strict=False)
+    model = V2V(
+        args['dropout_features'], 
+        args['frontend'], 
+        args["CHAR_NUM_CLASSES"], 
+        args["MAIN_REQ_INPUT_LENGTH"], 
+        args["ALPHA"], 
+        args["CHAR_TO_INDEX"]["<EOS>"],
+        args["CHAR_TO_INDEX"][" "],
+    )
 
     writer = pl_loggers.TensorBoardLogger(save_dir=args["CODE_DIRECTORY"], name='log', default_hp_metric=False)
     # removing the checkpoints directory if it exists and remaking it
