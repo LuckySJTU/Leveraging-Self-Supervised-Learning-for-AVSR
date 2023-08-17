@@ -98,7 +98,8 @@ class V2V(pl.LightningModule):
         self.spaceIdx = spaceIdx
 
 
-    def forward(self, source, sizes, target_lengths, targetinBatch=None):
+    def forward(self, source, target_lengths, targetinBatch=None):
+        _, _, source, vidLen = source
         frames = source.shape[1]
         features = self.feature_extractor(source)  # (B*N) x D
         features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1)     # B x D x N
@@ -108,7 +109,7 @@ class V2V(pl.LightningModule):
         vsr = None
         att = None
 
-        inputLenBatch = torch.tensor(sizes, dtype=torch.int64, device=source.device)
+        inputLenBatch = torch.tensor(vidLen, dtype=torch.int64, device=source.device)
         inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
         # vsr, _ = self.biGRU(x.permute(0, 2, 1))
         # vsr = self.dropout(vsr)
@@ -120,13 +121,14 @@ class V2V(pl.LightningModule):
         # vsr = vsr.logits
 
         teacher_forcing = 1 if targetinBatch is not None else 0
+        teacher = F.one_hot(targetinBatch.long()) if targetinBatch is not None else None
         
         vsr, att, att_seq, dec_state = self.att_deocder(
             x.permute(0,2,1), 
-            torch.tensor(sizes,device=x.device), 
-            max(target_lengths), 
+            vidLen, 
+            targetinBatch.shape[-1] if targetinBatch is not None else max(target_lengths), 
             tf_rate=teacher_forcing, 
-            teacher=targetinBatch,
+            teacher=teacher,
         )
         # att = self.att_proj(att)
 
@@ -134,7 +136,7 @@ class V2V(pl.LightningModule):
         # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
 
 
-        return inputLenBatch, (vsr, att)
+        return inputLenBatch, (vsr.permute(1,0,2), att)
 
 
     def training_step(self, batch, batch_idx):
@@ -150,7 +152,7 @@ class V2V(pl.LightningModule):
         targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
         concatTargetoutBatch = targetoutBatch[~targetMask]
 
-        inputLenBatch, outputBatch = self(inputBatch, targetinBatch, targetLenBatch.long(), True)
+        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), targetinBatch)
         with torch.backends.cudnn.flags(enabled=False):
             ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
             celoss = self.CELossFunction[0](outputBatch[1], targetoutBatch.long())
@@ -181,7 +183,7 @@ class V2V(pl.LightningModule):
         concatTargetoutBatch = targetoutBatch[~targetMask]
 
         # inputBatch: b*f*1*112*112; targetinBatch: b*L; targetLenBatch: b
-        inputLenBatch, outputBatch = self(inputBatch, targetinBatch, targetLenBatch.long(), False)
+        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), None)
         with torch.backends.cudnn.flags(enabled=False):
             ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
             celoss = self.CELossFunction[0](outputBatch[1], targetoutBatch.long())

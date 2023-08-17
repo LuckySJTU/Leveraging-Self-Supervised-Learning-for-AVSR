@@ -101,7 +101,7 @@ class att_deocder(nn.Module):
             if teacher is not None:
                 last_char = teacher[:,0,:]
             else:
-                last_char = torch.zeros((bs,42),dtype=context_feature.dtype,device=context_feature.device)
+                last_char = torch.zeros((bs,40),dtype=context_feature.dtype,device=context_feature.device)
                 last_char[:,0] = 1
                 last_char = self.tgt_embedding(last_char)
             att_seq, output_seq = [], []

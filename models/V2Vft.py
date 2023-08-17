@@ -68,6 +68,16 @@ class Conv3DAggegator(nn.Module):
         self.skip_connections = skip_connections
         self.residual_scale = math.sqrt(residual_scale)
 
+    def forward(self, x): #16*1*29*112*112
+        for rproj, conv in zip(self.residual_proj, self.conv_layers):
+            residual = x
+            x = conv(x)
+            if self.skip_connections:
+                if rproj is not None:
+                    residual = rproj(residual)
+                x = (x + residual) * self.residual_scale
+        return x
+
 class VisFeatureExtractionModel(nn.Module):
     def __init__(self, frontend):
         super(VisFeatureExtractionModel, self).__init__()
