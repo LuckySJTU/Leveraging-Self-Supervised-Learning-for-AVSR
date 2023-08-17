@@ -19,7 +19,8 @@ from torch_warmup_lr import WarmupLR
 from config import args
 from data.lrs2_dataset import LRS2
 from data.utils import collate_fn
-from models.V2Vft import VisFeatureExtractionModel 
+from models.V2Vft import VisFeatureExtractionModel
+from models.LAS import att_deocder
 from utils.decoders import ctc_greedy_decode, teacher_forcing_attention_decode
 from utils.label_smoothing import SmoothCTCLoss, SmoothCrossEntropyLoss
 from utils.metrics import compute_error_ch, compute_error_word
@@ -63,144 +64,106 @@ class V2V(pl.LightningModule):
 
         self.vocab_size = output_size
         
-        if self.vsr:
-            out_dim = 512 #self.feature_extractor.MoCoModel[-1][1].out_channels
-            # self.biGRU = nn.GRU(input_size, 512, 2, batch_first=True, bidirectional=True)
-            # self.dropout = nn.Dropout(p=0.25)
-
-            # out_dim = 512
-            # self.vsr_proj = nn.Linear(out_dim, output_size)
-
-            # self.vsr_bert = AutoModelForTokenClassification.from_pretrained("bert-base-uncased",num_labels=output_size)
-            # self.vsr_bert.bert.embeddings = nn.Identity()
-
-            self.att_deocder = att_deocder(
-                encode_size=out_dim,
-                dec_dim=512,
-                att_dim=1024,
-                vocab_size=output_size,
-                init_adadelta=True,
-                ctc_weight=0.5,
-                attention="dot",
-                decoder="LSTM",
-                emb_drop=0,
-            )
-
-
-    def forward(self, inputBatch, targetinBatch, targetLenBatch, maskw2v):
-        jointBatch, inputLenBatch, mask = self.subNetForward(inputBatch, maskw2v)
-        jointCTCOutputBatch = jointBatch.transpose(0, 1).transpose(1, 2)
-        jointCTCOutputBatch = self.jointOutputConv(jointCTCOutputBatch)
-        jointCTCOutputBatch = jointCTCOutputBatch.transpose(1, 2).transpose(0, 1)
-        jointCTCOutputBatch = F.log_softmax(jointCTCOutputBatch, dim=2)
-
-        targetinBatch = self.embed(targetinBatch.transpose(0, 1))
-        targetinMask = self.makeMaskfromLength(targetinBatch.shape[:-1][::-1], targetLenBatch, self.device)
-        squareMask = generate_square_subsequent_mask(targetinBatch.shape[0], self.device)
-        jointAttentionOutputBatch = self.jointAttentionDecoder(targetinBatch, jointBatch, tgt_mask=squareMask,
-                                                               tgt_key_padding_mask=targetinMask, memory_key_padding_mask=mask)
-        jointAttentionOutputBatch = jointAttentionOutputBatch.transpose(0, 1).transpose(1, 2)
-        jointAttentionOutputBatch = self.jointAttentionOutputConv(jointAttentionOutputBatch)
-        jointAttentionOutputBatch = jointAttentionOutputBatch.transpose(1, 2)
-
-        outputBatch = (jointCTCOutputBatch, jointAttentionOutputBatch)
-        return inputLenBatch, outputBatch
-
-    def makeMaskfromLength(self, maskShape, maskLength, maskDevice):
-        mask = torch.zeros(maskShape, device=maskDevice)
-        mask[(torch.arange(mask.shape[0]), maskLength - 1)] = 1
-        mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
-        return mask
-
-    def makePadding(self, audioBatch, audLen, videoBatch, vidLen):
-        if self.modal == "AO":
-            audPadding = audLen % 2
-            mask = (audPadding + audLen) > 2 * self.reqInpLen
-            audPadding = mask * audPadding + (~mask) * (2 * self.reqInpLen - audLen)
-            audLeftPadding = torch.floor(torch.div(audPadding, 2)).int()
-            audRightPadding = torch.ceil(torch.div(audPadding, 2)).int()
-
-            audioBatch = audioBatch.unsqueeze(1).unsqueeze(1)
-            audioBatch = list(audioBatch)
-            for i, _ in enumerate(audioBatch):
-                pad = nn.ReplicationPad2d(padding=(0, 0, audLeftPadding[i], audRightPadding[i]))
-                audioBatch[i] = pad(audioBatch[i][:, :, :audLen[i]]).squeeze(0).squeeze(0)
-
-            audioBatch = pad_sequence(audioBatch, batch_first=True)
-            inputLenBatch = ((audLen + audPadding) // 2).long()
-            mask = self.makeMaskfromLength([audioBatch.shape[0]] + [audioBatch.shape[1] // 2], inputLenBatch, self.device)
-
-        elif self.modal == "VO":
-            vidPadding = torch.zeros(len(videoBatch)).long().to(self.device)
-
-            mask = (vidPadding + vidLen) > self.reqInpLen
-            vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
-
-            vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
-            vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
-
-            for i, _ in enumerate(videoBatch):
-                pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
-                videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
-
-            videoBatch = pad_sequence(videoBatch, batch_first=True)
-            inputLenBatch = (vidLen + vidPadding).long()
-            mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, self.device)
-
-        else:
-            dismatch = audLen - 2 * vidLen
-            vidPadding = torch.ceil(torch.div(dismatch, 2)).int()
-            vidPadding = vidPadding * (vidPadding > 0)
-            audPadding = 2 * vidPadding - dismatch
-
-            mask = (vidPadding + vidLen) > self.reqInpLen
-            vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
-            mask = (audPadding + audLen) > 2 * self.reqInpLen
-            audPadding = mask * audPadding + (~mask) * (2 * self.reqInpLen - audLen)
-
-            vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
-            vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
-            audLeftPadding = torch.floor(torch.div(audPadding, 2)).int()
-            audRightPadding = torch.ceil(torch.div(audPadding, 2)).int()
-
-            audioBatch = audioBatch.unsqueeze(1).unsqueeze(1)
-            audioBatch = list(audioBatch)
-            for i, _ in enumerate(audioBatch):
-                pad = nn.ReplicationPad2d(padding=(0, 0, audLeftPadding[i], audRightPadding[i]))
-                audioBatch[i] = pad(audioBatch[i][:, :, :audLen[i]]).squeeze(0).squeeze(0)
-                pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
-                videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
-
-            audioBatch = pad_sequence(audioBatch, batch_first=True)
-            videoBatch = pad_sequence(videoBatch, batch_first=True)
-            inputLenBatch = (vidLen + vidPadding).long()
-            mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, self.device)
-
-        return audioBatch, videoBatch, inputLenBatch, mask
-
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=args["INIT_LR"], betas=(args["MOMENTUM1"], args["MOMENTUM2"]))
-        scheduler_reduce = ReduceLROnPlateau(optimizer, mode="min", factor=args["LR_SCHEDULER_FACTOR"], patience=args["LR_SCHEDULER_WAIT"],
-                                             threshold=args["LR_SCHEDULER_THRESH"], threshold_mode="abs", min_lr=args["FINAL_LR"], verbose=True)
-        if args["LRW_WARMUP_PERIOD"] > 0:
-            scheduler = WarmupLR(scheduler_reduce, init_lr=args["FINAL_LR"], num_warmup=args["LRS2_WARMUP_PERIOD"], warmup_strategy='cos')
-            scheduler.step(1)
-        else:
-            scheduler = scheduler_reduce
-
-        optim_dict = {
-            'optimizer': optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,  # The LR scheduler instance (required)
-                'interval': 'epoch',  # The unit of the scheduler's step size
-                'frequency': 1,  # The frequency of the scheduler
-                'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler
-                'monitor': 'CER/val_CER',
-                'strict': True,  # Whether to crash the training if `monitor` is not found
-                'name': None,  # Custom name for LearningRateMonitor to use
-            }
+        hidden_dim = {
+            "resnet18":512,
+            "resnet50":2048,
         }
-        return optim_dict
+        out_dim = hidden_dim[frontend] #self.feature_extractor.MoCoModel[-1][1].out_channels
+        # self.biGRU = nn.GRU(input_size, 512, 2, batch_first=True, bidirectional=True)
+        # self.dropout = nn.Dropout(p=0.25)
+
+        # out_dim = 512
+        # self.vsr_proj = nn.Linear(out_dim, output_size)
+
+        # self.vsr_bert = AutoModelForTokenClassification.from_pretrained("bert-base-uncased",num_labels=output_size)
+        # self.vsr_bert.bert.embeddings = nn.Identity()
+
+        self.att_deocder = att_deocder(
+            encode_size=out_dim,
+            dec_dim=512,
+            att_dim=1024,
+            vocab_size=output_size,
+            init_adadelta=True,
+            ctc_weight=0.5,
+            attention="dot",
+            decoder="LSTM",
+            emb_drop=0,
+        )
+
+
+    def forward(self, source, sizes, targetinBatch, targetoutBatch, target_lengths):
+        frames = source.shape[1]
+        if self.avhubert:
+            x=self.backbone.forward_features(source.permute(0,2,1,3,4),'video')
+            # x=x.permute(0,2,1)
+        else:
+            features = self.backbone.feature_extractor(source)  # (B*N) x D
+            features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1)     # B x D x N
+            x = self.backbone.dropout_feats(features)
+            # x = self.backbone.feature_aggregator(x)     # B x D x N
+            # x = self.backbone.dropout_agg(x)
+        cls = None
+        vsr = None
+        att = None
+        if self.wb and word_boundary:
+            word_boundary = torch.tensor(word_boundary,device=x.device)
+            word_boundary = word_boundary.unsqueeze(2)
+            x = x.permute(0,2,1)
+            x = torch.dstack((x,word_boundary))
+            x = x.permute(0,2,1)
+
+        if self.LRW:
+            if self.cls_type == "TCN":
+                cls = self.tcn(x)
+                cls = torch.mean(cls, -1)
+                cls = self.cls_proj(cls)
+            elif self.cls_type=="Linear":
+                cls = self.cls_proj(torch.mean(x,-1))
+            elif self.cls_type=="MSTCN":
+                cls = self.mstcn(x)
+                cls = sum(cls)
+                cls = torch.mean(cls,-1)
+                cls = self.cls_proj(cls)
+            else:
+                # default GRU
+                h, _ = self.gru(x.permute(0, 2, 1))
+                cls = self.cls_proj(self.dropout(h)).mean(1)
+        
+        if self.vsr:
+            # vsr, _ = self.biGRU(x.permute(0, 2, 1))
+            # vsr = self.dropout(vsr)
+            # vsr = self.vsr_proj(vsr)
+
+            # vsr = self.vsr_proj(x.permute(0,2,1))
+
+            # vsr = self.vsr_bert(inputs_embeds=x.permute(0,2,1)) # batch*512*length
+            # vsr = vsr.logits
+
+            teacher_forcing = 1 if targets is not None else 0
+            teach = None
+            if teacher_forcing:
+                # teach: <bos>Sentence<eos>, but only use <bos>Sentence
+                # target: Sentence<eos>
+                teach = torch.zeros((targets.shape[0],targets.shape[1]+1,self.vocab_size),dtype=torch.long,device=targets.device)
+                for i in range(targets.shape[0]):
+                    teach[i,1:,:] = F.one_hot(targets[i].long(), num_classes=self.vocab_size)
+                teach[:,0,0] = 1
+            
+            vsr, att, att_seq, dec_state = self.att_deocder(
+                x.permute(0,2,1), 
+                torch.tensor(sizes,device=x.device), 
+                max(target_lengths), 
+                tf_rate=teacher_forcing, 
+                teacher=teach,
+            )
+            # att = self.att_proj(att)
+
+            # encoder_out = {"encoder_out": [x.permute(2,0,1)], "encoder_padding_mask": padding_mask}
+            # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
+
+
+        return vsr, cls, att
+
 
     def training_step(self, batch, batch_idx):
         inputBatch, targetinBatch, targetoutBatch, targetLenBatch = batch
@@ -254,6 +217,7 @@ class V2V(pl.LightningModule):
         targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
         concatTargetoutBatch = targetoutBatch[~targetMask]
 
+        # inputBatch: b*f*1*112*112; targetinBatch: b*L; targetLenBatch: b
         inputLenBatch, outputBatch = self(inputBatch, targetinBatch, targetLenBatch.long(), False)
         with torch.backends.cudnn.flags(enabled=False):
             ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
@@ -280,24 +244,29 @@ class V2V(pl.LightningModule):
         items.pop("v_num", None)
         return items
 
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=args["INIT_LR"], betas=(args["MOMENTUM1"], args["MOMENTUM2"]))
+        scheduler_reduce = ReduceLROnPlateau(optimizer, mode="min", factor=args["LR_SCHEDULER_FACTOR"], patience=args["LR_SCHEDULER_WAIT"],
+                                             threshold=args["LR_SCHEDULER_THRESH"], threshold_mode="abs", min_lr=args["FINAL_LR"], verbose=True)
+        if args["LRW_WARMUP_PERIOD"] > 0:
+            scheduler = WarmupLR(scheduler_reduce, init_lr=args["FINAL_LR"], num_warmup=args["LRS2_WARMUP_PERIOD"], warmup_strategy='cos')
+            scheduler.step(1)
+        else:
+            scheduler = scheduler_reduce
 
-class UnfreezeCallback(Callback):
-    """Unfreeze feature extractor callback."""
-
-    def on_epoch_start(self, trainer, pl_module):
-        if not pl_module.ft and trainer.current_epoch > args["W2V_FREEZE_EPOCH"]:
-            pl_module.ft = True
-
-    def on_train_epoch_start(self, trainer, pl_module):
-        if not pl_module.ft:
-            pl_module.wav2vecModel.eval()
-        if args["MODAL"] == "AV":
-            pl_module.wav2vecModel.eval()
-            pl_module.audioConv.eval()
-            pl_module.audioEncoder.eval()
-            pl_module.visualModel.eval()
-            pl_module.videoConv.eval()
-            pl_module.videoEncoder.eval()
+        optim_dict = {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,  # The LR scheduler instance (required)
+                'interval': 'epoch',  # The unit of the scheduler's step size
+                'frequency': 1,  # The frequency of the scheduler
+                'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler
+                'monitor': 'CER/val_CER',
+                'strict': True,  # Whether to crash the training if `monitor` is not found
+                'name': None,  # Custom name for LearningRateMonitor to use
+            }
+        }
+        return optim_dict
 
 
 def main():
@@ -307,7 +276,7 @@ def main():
     LRS2Dataloader.setup('fit')
     modelargs = (args["DMODEL"], args["TX_ATTENTION_HEADS"], args["TX_NUM_LAYERS"], args["PE_MAX_LENGTH"], args["AUDIO_FEATURE_SIZE"],
                  args["VIDEO_FEATURE_SIZE"], args["TX_FEEDFORWARD_DIM"], args["TX_DROPOUT"], args["CHAR_NUM_CLASSES"])
-    model = AVNet(args['MODAL'], args['WAV2VEC_FILE'], args['MOCO_FRONTEND_FILE'], args["MAIN_REQ_INPUT_LENGTH"], modelargs)
+    model = V2V(0.1, "resnet18", 40)
     # loading the pretrained weights
     if not args["MODAL"] == "AV" and args["TRAIN_LRS2_MODEL_FILE"] is not None:
         stateDict = torch.load(args["TRAIN_LRS2_MODEL_FILE"], map_location="cpu")['state_dict']
@@ -344,11 +313,7 @@ def main():
     )
 
     lr_monitor = LearningRateMonitor(logging_interval='step')
-
-    if args["MODAL"] == "VO":
-        callback_list = [checkpoint_callback, lr_monitor]
-    else:
-        callback_list = [checkpoint_callback, lr_monitor, UnfreezeCallback()]
+    callback_list = [checkpoint_callback, lr_monitor]
 
     trainer = pl.Trainer(
         gpus=args["GPU_IDS"],
