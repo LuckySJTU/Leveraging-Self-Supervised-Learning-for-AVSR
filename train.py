@@ -19,8 +19,7 @@ from torch_warmup_lr import WarmupLR
 from config import args
 from data.lrs2_dataset import LRS2
 from data.utils import collate_fn
-from models.moco_visual_frontend import MoCoVisualFrontend
-from models.utils import PositionalEncoding, conv1dLayers, outputConv, MaskedLayerNorm, generate_square_subsequent_mask
+from models.V2Vft import VisFeatureExtractionModel 
 from utils.decoders import ctc_greedy_decode, teacher_forcing_attention_decode
 from utils.label_smoothing import SmoothCTCLoss, SmoothCrossEntropyLoss
 from utils.metrics import compute_error_ch, compute_error_word
@@ -56,156 +55,37 @@ class LRS2Lightning(pl.LightningDataModule):
         return DataLoader(self.testData, batch_size=args["BATCH_SIZE"], collate_fn=collate_fn, shuffle=False, **self.kwargs)
 
 
-class AVNet(pl.LightningModule):
+class V2V(pl.LightningModule):
+    def __init__(self, dropout_features, frontend, output_size):
+        super(V2V, self).__init__()
+        self.feature_extractor = VisFeatureExtractionModel(frontend)
+        self.dropout_feats = nn.Dropout(p=dropout_features)
 
-    def __init__(self, modal, W2Vfile, MoCofile, reqInpLen, modelargs):
-        super(AVNet, self).__init__()
+        self.vocab_size = output_size
+        
+        if self.vsr:
+            out_dim = 512 #self.feature_extractor.MoCoModel[-1][1].out_channels
+            # self.biGRU = nn.GRU(input_size, 512, 2, batch_first=True, bidirectional=True)
+            # self.dropout = nn.Dropout(p=0.25)
 
-        self.trainParams = {"spaceIx": args["CHAR_TO_INDEX"][" "], "eosIx": args["CHAR_TO_INDEX"]["<EOS>"], "modal": args["MODAL"],
-                            "Alpha": args["ALPHA"]}
+            # out_dim = 512
+            # self.vsr_proj = nn.Linear(out_dim, output_size)
 
-        self.valParams = {"spaceIx": args["CHAR_TO_INDEX"][" "], "eosIx": args["CHAR_TO_INDEX"]["<EOS>"], "modal": args["MODAL"],
-                          "Alpha": args["ALPHA"]}
+            # self.vsr_bert = AutoModelForTokenClassification.from_pretrained("bert-base-uncased",num_labels=output_size)
+            # self.vsr_bert.bert.embeddings = nn.Identity()
 
-        self.ft = False
+            self.att_deocder = att_deocder(
+                encode_size=out_dim,
+                dec_dim=512,
+                att_dim=1024,
+                vocab_size=output_size,
+                init_adadelta=True,
+                ctc_weight=0.5,
+                attention="dot",
+                decoder="LSTM",
+                emb_drop=0,
+            )
 
-        self.CTCLossFunction = [SmoothCTCLoss(args["CHAR_NUM_CLASSES"], blank=0)]
-        self.CELossFunction = [SmoothCrossEntropyLoss()]
-
-        dModel, nHeads, numLayers, peMaxLen, audinSize, vidinSize, fcHiddenSize, dropout, numClasses = modelargs
-        self.modal = modal
-        self.numClasses = numClasses
-        self.reqInpLen = reqInpLen
-        # A & V Modal
-        tx_norm = nn.LayerNorm(dModel)
-        self.maskedLayerNorm = MaskedLayerNorm()
-        if self.modal == "AV":
-            self.ModalityNormalization = nn.LayerNorm(dModel)
-        self.EncoderPositionalEncoding = PositionalEncoding(dModel=dModel, maxLen=peMaxLen)
-        # audio
-        if not self.modal == "VO":
-            # front-end
-            wav2vecModel, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([W2Vfile], arg_overrides={
-                "apply_mask": True,
-                "mask_prob": 0.5,
-                "mask_channel_prob": 0.25,
-                "mask_channel_length": 64,
-                "layerdrop": 0.1,
-                "activation_dropout": 0.1,
-                "feature_grad_mult": 0.0,
-            })
-            wav2vecModel = wav2vecModel[0]
-            wav2vecModel.remove_pretraining_modules()
-            self.wav2vecModel = wav2vecModel
-            # back-end
-            self.audioConv = conv1dLayers(self.maskedLayerNorm, audinSize, dModel, dModel, downsample=True)
-            audioEncoderLayer = nn.TransformerEncoderLayer(d_model=dModel, nhead=nHeads, dim_feedforward=fcHiddenSize, dropout=dropout)
-            self.audioEncoder = nn.TransformerEncoder(audioEncoderLayer, num_layers=numLayers, norm=tx_norm)
-        else:
-            self.wav2vecModel = None
-            self.audioConv = None
-            self.audioEncoder = None
-        # visual
-        if not self.modal == "AO":
-            # front-end
-            visualModel = MoCoVisualFrontend()
-            visualModel.load_state_dict(torch.load(MoCofile, map_location="cpu"), strict=False)
-            self.visualModel = visualModel
-            # back-end
-            self.videoConv = conv1dLayers(self.maskedLayerNorm, vidinSize, dModel, dModel)
-            videoEncoderLayer = nn.TransformerEncoderLayer(d_model=dModel, nhead=nHeads, dim_feedforward=fcHiddenSize, dropout=dropout)
-            self.videoEncoder = nn.TransformerEncoder(videoEncoderLayer, num_layers=numLayers, norm=tx_norm)
-        else:
-            self.visualModel = None
-            self.videoConv = None
-            self.videoEncoder = None
-        # JointConv for fusion
-        if self.modal == "AV":
-            self.jointConv = conv1dLayers(self.maskedLayerNorm, 2 * dModel, dModel, dModel)
-            jointEncoderLayer = nn.TransformerEncoderLayer(d_model=dModel, nhead=nHeads, dim_feedforward=fcHiddenSize, dropout=dropout)
-            self.jointEncoder = nn.TransformerEncoder(jointEncoderLayer, num_layers=numLayers, norm=tx_norm)
-        self.jointOutputConv = outputConv(self.maskedLayerNorm, dModel, numClasses)
-        self.decoderPositionalEncoding = PositionalEncoding(dModel=dModel, maxLen=peMaxLen)
-        self.embed = torch.nn.Sequential(
-            nn.Embedding(numClasses, dModel),
-            self.decoderPositionalEncoding
-        )
-        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=dModel, nhead=nHeads, dim_feedforward=fcHiddenSize, dropout=dropout)
-        self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=numLayers, norm=tx_norm)
-        self.jointAttentionOutputConv = outputConv("LN", dModel, numClasses)
-        return
-
-    def subNetForward(self, inputBatch, maskw2v):
-        audioBatch, audMask, videoBatch, vidLen = inputBatch
-        if not self.modal == "VO":
-            if self.ft and self.modal == "AO":
-                audioBatch, audMask = self.wav2vecModel.extract_features(audioBatch, padding_mask=audMask, mask=maskw2v)
-            else:
-                with torch.no_grad():
-                    audioBatch, audMask = self.wav2vecModel.extract_features(audioBatch, padding_mask=audMask, mask=maskw2v)
-
-            audLen = torch.sum(~audMask, dim=1)
-        else:
-            audLen = None
-
-        if not self.modal == "AO":
-            videoBatch = videoBatch.transpose(1, 2)
-            if self.modal == "AV":
-                with torch.no_grad():
-                    videoBatch = self.visualModel(videoBatch, vidLen.long())
-            else:
-                videoBatch = self.visualModel(videoBatch, vidLen.long())
-
-            videoBatch = list(torch.split(videoBatch, vidLen.tolist(), dim=0))
-
-        audioBatch, videoBatch, inputLenBatch, mask = self.makePadding(audioBatch, audLen, videoBatch, vidLen)
-
-        if isinstance(self.maskedLayerNorm, MaskedLayerNorm):
-            self.maskedLayerNorm.SetMaskandLength(mask, inputLenBatch)
-
-        if not self.modal == "VO":
-            if self.modal == "AV":
-                with torch.no_grad():
-                    audioBatch = audioBatch.transpose(1, 2)
-                    audioBatch = self.audioConv(audioBatch)
-                    audioBatch = audioBatch.transpose(1, 2).transpose(0, 1)
-                    audioBatch = self.EncoderPositionalEncoding(audioBatch)
-                    audioBatch = self.audioEncoder(audioBatch, src_key_padding_mask=mask)
-            else:
-                audioBatch = audioBatch.transpose(1, 2)
-                audioBatch = self.audioConv(audioBatch)
-                audioBatch = audioBatch.transpose(1, 2).transpose(0, 1)
-                audioBatch = self.EncoderPositionalEncoding(audioBatch)
-                audioBatch = self.audioEncoder(audioBatch, src_key_padding_mask=mask)
-
-        if not self.modal == "AO":
-            if self.modal == "AV":
-                with torch.no_grad():
-                    videoBatch = videoBatch.transpose(1, 2)
-                    videoBatch = self.videoConv(videoBatch)
-                    videoBatch = videoBatch.transpose(1, 2).transpose(0, 1)
-                    videoBatch = self.EncoderPositionalEncoding(videoBatch)
-                    videoBatch = self.videoEncoder(videoBatch, src_key_padding_mask=mask)
-            else:
-                videoBatch = videoBatch.transpose(1, 2)
-                videoBatch = self.videoConv(videoBatch)
-                videoBatch = videoBatch.transpose(1, 2).transpose(0, 1)
-                videoBatch = self.EncoderPositionalEncoding(videoBatch)
-                videoBatch = self.videoEncoder(videoBatch, src_key_padding_mask=mask)
-
-        if self.modal == "AO":
-            jointBatch = audioBatch
-        elif self.modal == "VO":
-            jointBatch = videoBatch
-        else:
-            jointBatch = torch.cat([self.ModalityNormalization(audioBatch), self.ModalityNormalization(videoBatch)], dim=2)
-            jointBatch = jointBatch.transpose(0, 1).transpose(1, 2)
-            jointBatch = self.jointConv(jointBatch)
-            jointBatch = jointBatch.transpose(1, 2).transpose(0, 1)
-            jointBatch = self.EncoderPositionalEncoding(jointBatch)
-            jointBatch = self.jointEncoder(jointBatch, src_key_padding_mask=mask)
-
-        return jointBatch, inputLenBatch, mask
 
     def forward(self, inputBatch, targetinBatch, targetLenBatch, maskw2v):
         jointBatch, inputLenBatch, mask = self.subNetForward(inputBatch, maskw2v)
@@ -478,7 +358,7 @@ def main():
         default_root_dir=args["CODE_DIRECTORY"],
         callbacks=callback_list,
         accelerator="dp",
-        plugins=DDPPlugin(find_unused_parameters=False if args["MODAL"] == "VO" else True),
+        #plugins=DDPPlugin(find_unused_parameters=False if args["MODAL"] == "VO" else True),
     )
     trainer.fit(model, LRS2Dataloader)
     return

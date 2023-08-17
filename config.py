@@ -3,23 +3,23 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = ''
-args["DATA_DIRECTORY"] = "../LRS2/mvlrs_v1"
-args["HDF5_FILE"] = "../LRS2/mvlrs_v1/LRS2.h5"
-args["LRW_DATA_DIRECTORY"] = "../LRW/lipread_mp4"
-args["LRW_HDF5_FILE"] = "../LRW/LRW.h5"
-args["NOISE_FILE"] = "../LRS2/mvlrs_v1/Noise.h5"
-args["HUMAN_NOISE_FILE"] = "../LRS2/mvlrs_v1/HumanNoise.h5"
-args["SHAPE_PREDICTOR_FILE"] = "../pretrain_model/shape_predictor_68_face_landmarks.dat"
-args["MOCO_FILE"] = "../pretrain_model/moco_v2_200ep_pretrain.pth"
+args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR'#
+args["DATA_DIRECTORY"] = "/home/xcpan/server_1/LRS2/mvlrs_v1"
+args["HDF5_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/LRS2.h5"
+args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
+args["LRW_HDF5_FILE"] = "/home/yxwang/Dataset/LRW/LRW.h5"
+args["NOISE_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/Noise.h5"
+args["HUMAN_NOISE_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/HumanNoise.h5"
+args["SHAPE_PREDICTOR_FILE"] = "/home/xcpan/server_1/pretrain_model/shape_predictor_68_face_landmarks.dat"
+args["MOCO_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_v2_200ep_pretrain.pth"
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [0, 1, 2, 3]
+args["GPU_IDS"] = [0, 1, 2, 3]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 2
-args["BATCH_SIZE"] = 8
+args["BATCH_SIZE"] = 32
 args["STEP_SIZE"] = 16384
 args["INIT_LR"] = 1e-4
 
@@ -36,15 +36,15 @@ args["EVAL_LRW_MODEL_FILE"] = None
 """
 args["ALPHA"] = 0.2
 
-args["MODAL"] = "AV"  # "AO" "VO" "AV"
+args["MODAL"] = "VO"  # "AO" "VO" "AV"
 args["NOISE_SNR_DB"] = 5  # noise level in dB SNR
 args["NOISE_PROBABILITY"] = 0.25
 
 args["W2V_FREEZE_EPOCH"] = 40
 args["LRS2_WARMUP_PERIOD"] = 80
 
-args["MOCO_FRONTEND_FILE"] = "../pretrain_model/moco_frontend.pt"
-args["WAV2VEC_FILE"] = "../pretrain_model/wav2vec_vox_new.pt"
+args["MOCO_FRONTEND_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_frontend.pt"#"/home/yxwang/train-step_0000-Acc_0.000.pt
+args["WAV2VEC_FILE"] = "/home/xcpan/server_1/pretrain_model/wav2vec_vox_new.pt"
 args["TRAIN_LRS2_MODEL_FILE"] = None
 args["TRAINED_AO_FILE"] = None
 args["TRAINED_VO_FILE"] = None
@@ -55,7 +55,7 @@ args["BEAM_WIDTH"] = 5
 args["TEST_WITH_NOISE"] = False
 args["TEST_NOISE_SNR_DB"] = 5
 args["DECODE_TYPE"] = "HYBRID"  # HYBRID ATTN TFATTN CTC
-args["EVAL_LRS2_MODEL_FILE"] = None
+args["EVAL_LRS2_MODEL_FILE"] = None#/home/yxwang/train-step_0262-wer_0.893.ckpt
 
 """
     =====Default Parameters=====
@@ -70,8 +70,8 @@ args["SAVE_FREQUENCY"] = 10
 args["MAIN_REQ_INPUT_LENGTH"] = 80  # minimum input length while training
 
 # training
-args["SEED"] = 19260817  # seed for random number generators
-args["NUM_STEPS"] = 1000  # maximum number of steps to train for (early stopping is used)
+args["SEED"] = 19260817  # seed for random number generators (6)
+args["NUM_STEPS"] = 80  # maximum number of steps to train for (early stopping is used)
 
 # optimizer, scheduler and modality dropping
 args["FINAL_LR"] = 1e-7  # final learning rate for scheduler
