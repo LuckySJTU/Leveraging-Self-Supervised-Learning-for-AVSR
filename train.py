@@ -98,7 +98,7 @@ class V2V(pl.LightningModule):
         self.spaceIdx = spaceIdx
 
 
-    def forward(self, source, target_lengths, targetinBatch=None):
+    def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
         _, _, source, vidLen = source
         frames = source.shape[1]
         features = self.feature_extractor(source)  # (B*N) x D
@@ -110,7 +110,8 @@ class V2V(pl.LightningModule):
         att = None
 
         inputLenBatch = torch.tensor(vidLen, dtype=torch.int64, device=source.device)
-        inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
+        # inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
+        
         # vsr, _ = self.biGRU(x.permute(0, 2, 1))
         # vsr = self.dropout(vsr)
         # vsr = self.vsr_proj(vsr)
@@ -120,7 +121,6 @@ class V2V(pl.LightningModule):
         # vsr = self.vsr_bert(inputs_embeds=x.permute(0,2,1)) # batch*512*length
         # vsr = vsr.logits
 
-        teacher_forcing = 1 if targetinBatch is not None else 0
         teacher = F.one_hot(targetinBatch.long()) if targetinBatch is not None else None
         
         vsr, att, att_seq, dec_state = self.att_deocder(
@@ -152,7 +152,7 @@ class V2V(pl.LightningModule):
         targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
         concatTargetoutBatch = targetoutBatch[~targetMask]
 
-        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), targetinBatch)
+        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), targetinBatch, 1)
         with torch.backends.cudnn.flags(enabled=False):
             ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
             celoss = self.CELossFunction[0](outputBatch[1], targetoutBatch.long())
@@ -183,7 +183,7 @@ class V2V(pl.LightningModule):
         concatTargetoutBatch = targetoutBatch[~targetMask]
 
         # inputBatch: b*f*1*112*112; targetinBatch: b*L; targetLenBatch: b
-        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), None)
+        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), targetinBatch, 0)
         with torch.backends.cudnn.flags(enabled=False):
             ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
             celoss = self.CELossFunction[0](outputBatch[1], targetoutBatch.long())

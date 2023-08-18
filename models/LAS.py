@@ -85,7 +85,7 @@ class att_deocder(nn.Module):
         ctc_output, att_output, att_seq = None, None, None
         dec_state = [] if get_dec_state else None
 
-        if teacher is not None:
+        if teacher is not None and tf_rate>0:
             teacher = self.tgt_embedding(teacher.float())
 
         # CTC based decoding
@@ -98,7 +98,7 @@ class att_deocder(nn.Module):
             # Init (init char = <SOS>, reset all rnn state and cell) (<s>)
             self.decoder.init_state(bs)
             self.attention.reset_mem()
-            if teacher is not None:
+            if teacher is not None and tf_rate>0:
                 last_char = teacher[:,0,:]
             else:
                 last_char = torch.zeros((bs,40),dtype=context_feature.dtype,device=context_feature.device)
@@ -119,7 +119,7 @@ class att_deocder(nn.Module):
                 decoder_input = torch.cat([last_char, context], dim=-1)
                 cur_char, d_state = self.decoder(decoder_input)
                 # Prepare output as input of next step
-                if (teacher is not None):
+                if (teacher is not None and tf_rate>0 and t<decode_step-1):
                     # Training stage
                     if (tf_rate == 1) or (torch.rand(1).item() <= tf_rate):
                         # teacher forcing
