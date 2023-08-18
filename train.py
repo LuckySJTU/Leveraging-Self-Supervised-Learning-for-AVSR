@@ -109,9 +109,9 @@ class V2V(pl.LightningModule):
         vsr = None
         att = None
 
-        inputLenBatch = torch.tensor(vidLen, dtype=torch.int64, device=source.device)
+        inputLenBatch = vidLen
         # inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
-        
+
         # vsr, _ = self.biGRU(x.permute(0, 2, 1))
         # vsr = self.dropout(vsr)
         # vsr = self.vsr_proj(vsr)
@@ -278,6 +278,7 @@ def main():
         default_root_dir=args["CODE_DIRECTORY"],
         callbacks=callback_list,
         accelerator="dp",
+        #fast_dev_run=True,
         #plugins=DDPPlugin(find_unused_parameters=False if args["MODAL"] == "VO" else True),
     )
     trainer.fit(model, LRS2Dataloader)
