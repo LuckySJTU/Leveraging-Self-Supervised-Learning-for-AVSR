@@ -160,6 +160,8 @@ class V2V(pl.LightningModule):
         self.log("info/train_ctcloss", ctcloss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("info/train_celoss", celoss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("info/train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        if loss==torch.nan:
+            print(loss)
 
         predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0].detach(), inputLenBatch, self.eosIdx)
         c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
@@ -277,7 +279,7 @@ def main():
         logger=writer,
         default_root_dir=args["CODE_DIRECTORY"],
         callbacks=callback_list,
-        accelerator="dp",
+        accelerator="ddp",
         #fast_dev_run=True,
         #plugins=DDPPlugin(find_unused_parameters=False if args["MODAL"] == "VO" else True),
     )

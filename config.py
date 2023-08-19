@@ -15,7 +15,7 @@ args["MOCO_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_v2_200ep_pretrain.
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [0, 1]#, 2, 3
+args["GPU_IDS"] = [0, 1, 2, 3]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
@@ -78,7 +78,7 @@ args["MAIN_REQ_INPUT_LENGTH"] = 80  # minimum input length while training
 
 # training
 args["SEED"] = 19260817  # seed for random number generators (6)
-args["NUM_STEPS"] = 80  # maximum number of steps to train for (early stopping is used)
+args["NUM_STEPS"] = 100  # maximum number of steps to train for (early stopping is used)
 
 # optimizer, scheduler and modality dropping
 args["FINAL_LR"] = 1e-7  # final learning rate for scheduler
