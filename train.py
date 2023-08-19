@@ -281,7 +281,7 @@ def main():
         callbacks=callback_list,
         accelerator="ddp",
         #fast_dev_run=True,
-        #plugins=DDPPlugin(find_unused_parameters=False if args["MODAL"] == "VO" else True),
+        plugins=DDPPlugin(find_unused_parameters=False), #if args["MODAL"] == "VO" else True
     )
     trainer.fit(model, LRS2Dataloader)
     return
