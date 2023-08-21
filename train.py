@@ -138,11 +138,7 @@ class V2V(pl.LightningModule):
         # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
 
 
-<<<<<<< HEAD
         return inputLenBatch, (F.log_softmax(vsr.permute(1, 0, 2), dim=-1), att)
-=======
-        return inputLenBatch, (F.log_softmax(vsr, dim=-1).permute(1, 0, 2), att)
->>>>>>> cba99c55392c8000250531e421f9e270013de8fa
 
 
     def training_step(self, batch, batch_idx):
