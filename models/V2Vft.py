@@ -90,7 +90,7 @@ class VisFeatureExtractionModel(nn.Module):
             residual_scale=0.5,
             non_affine_group_norm=False,
             conv_bias=True,
-            zero_pad=False,
+            zero_pad=True,
             activation=nn.ReLU()
         )
         MoCoModel = models.__dict__[frontend]()
@@ -103,13 +103,19 @@ class VisFeatureExtractionModel(nn.Module):
 
         # print(self.MoCoModel)
 
-    def forward(self, x):
+    def forward(self, x, x_len):
         #input x : 16*29*1*112*112
         x = x.permute(0, 2, 1, 3, 4)
         x = self.conv3D(x) # 16*64*29*26*26
         x = x.permute(0, 2, 1, 3, 4) #16*29*64*26*26
         # x: B x N x C x H x W
-        x = x.reshape(-1, x.shape[-3], x.shape[-2], x.shape[-1]) #464*64*26*26
+        # x = x.reshape(-1, x.shape[-3], x.shape[-2], x.shape[-1]) #464*64*26*26
+
+        mask = torch.zeros(x.shape[:2], device=x.device)
+        mask[(torch.arange(mask.shape[0], device=x.device), x_len - 1)] = 1
+        mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        x = x[~mask]
+
         x = self.MoCoModel(x) #464*2048
         return x
         # return shape: (B*N) x 512

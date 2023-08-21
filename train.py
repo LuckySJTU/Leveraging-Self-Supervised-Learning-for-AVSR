@@ -101,16 +101,18 @@ class V2V(pl.LightningModule):
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
         _, _, source, vidLen = source
         frames = source.shape[1]
-        features = self.feature_extractor(source)  # (B*N) x D
-        features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1)     # B x D x N
-        x = self.dropout_feats(features)
+        x = self.feature_extractor(source, vidLen)  # (B*N) x D
+        # features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1)     # B x D x N
+        x = self.dropout_feats(x)
         # x = self.backbone.feature_aggregator(x)     # B x D x N
         # x = self.backbone.dropout_agg(x)
         vsr = None
         att = None
 
-        inputLenBatch = vidLen
+        # inputLenBatch = vidLen
         # inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
+        x = list(torch.split(x, vidLen.tolist(), dim=0))
+        x, inputLenBatch, mask = self.makePadding(x, vidLen)
 
         # vsr, _ = self.biGRU(x.permute(0, 2, 1))
         # vsr = self.dropout(vsr)
@@ -124,7 +126,7 @@ class V2V(pl.LightningModule):
         teacher = F.one_hot(targetinBatch.long()) if targetinBatch is not None else None
         
         vsr, att, att_seq, dec_state = self.att_deocder(
-            x.permute(0,2,1), 
+            x, 
             vidLen, 
             targetinBatch.shape[-1] if targetinBatch is not None else max(target_lengths), 
             tf_rate=teacher_forcing, 
@@ -136,7 +138,7 @@ class V2V(pl.LightningModule):
         # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
 
 
-        return inputLenBatch, (vsr.permute(1,0,2), att)
+        return inputLenBatch, (F.log_softmax(vsr, dim=-1).permute(1, 0, 2), att)
 
 
     def training_step(self, batch, batch_idx):
@@ -235,6 +237,30 @@ class V2V(pl.LightningModule):
         }
         return optim_dict
 
+    def makePadding(self, videoBatch, vidLen):
+        device = videoBatch[0].device
+        vidPadding = torch.zeros(len(videoBatch)).long().to(device)
+
+        mask = (vidPadding + vidLen) > self.reqInpLen
+        vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
+
+        vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
+        vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
+
+        for i, _ in enumerate(videoBatch):
+            pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
+            videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
+
+        videoBatch = pad_sequence(videoBatch, batch_first=True)
+        inputLenBatch = (vidLen + vidPadding).long()
+        mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, self.device)
+        return videoBatch, inputLenBatch, mask
+    
+    def makeMaskfromLength(self, maskShape, maskLength, maskDevice):
+        mask = torch.zeros(maskShape, device=maskDevice)
+        mask[(torch.arange(mask.shape[0]), maskLength - 1)] = 1
+        mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        return mask
 
 def main():
     pl.seed_everything(args["SEED"])
