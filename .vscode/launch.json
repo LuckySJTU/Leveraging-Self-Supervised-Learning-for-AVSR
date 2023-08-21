@@ -12,7 +12,11 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {
+<<<<<<< HEAD
                 "CUDA_VISIBLE_DEVICES":"0,1,2,3",
+=======
+                "CUDA_VISIBLE_DEVICES":"4,5",
+>>>>>>> cba99c55392c8000250531e421f9e270013de8fa
             }
         }
     ]
