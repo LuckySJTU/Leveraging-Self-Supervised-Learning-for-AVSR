@@ -3,7 +3,7 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR'#
+args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR_test'#
 args["DATA_DIRECTORY"] = "/home/xcpan/server_1/LRS2/mvlrs_v1"
 args["HDF5_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/LRS2.h5"
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
@@ -21,7 +21,7 @@ args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
 args["BATCH_SIZE"] = 8
 args["STEP_SIZE"] = 16384
-args["INIT_LR"] = 1e-4
+args["INIT_LR"] = 1e-3
 
 """
     For LRW
@@ -114,7 +114,6 @@ args["CHAR_TO_INDEX"] = {" ": 1, "'": 22, "1": 30, "0": 29, "3": 37, "2": 32, "5
 args["INDEX_TO_CHAR"] = {1: " ", 22: "'", 30: "1", 29: "0", 37: "3", 32: "2", 34: "5", 38: "4", 36: "7", 35: "6", 31: "9", 33: "8", 5: "A", 17: "C",
                          20: "B", 2: "E", 12: "D", 16: "G", 19: "F", 6: "I", 9: "H", 24: "K", 25: "J", 18: "M", 11: "L", 4: "O", 7: "N", 27: "Q",
                          21: "P", 8: "S", 10: "R", 13: "U", 3: "T", 15: "W", 23: "V", 14: "Y", 26: "X", 28: "Z", 39: "<EOS>"}
-
 
 args["WORD_TO_INDEX"] = {'UNION': 0, 'BECOME': 1, 'COMPANIES': 2, 'NUMBERS': 3, 'CHILDREN': 4, 'TEMPERATURES': 5, 'BUILD': 6, 'ANOTHER': 7,
                          'ECONOMY': 8, 'PARTIES': 9, 'FUTURE': 10, 'SERIOUS': 11, 'SIMPLY': 12, 'FOREIGN': 13, 'SINGLE': 14, 'SEEMS': 15,
