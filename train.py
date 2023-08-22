@@ -79,17 +79,17 @@ class V2V(pl.LightningModule):
         # self.vsr_bert = AutoModelForTokenClassification.from_pretrained("bert-base-uncased",num_labels=output_size)
         # self.vsr_bert.bert.embeddings = nn.Identity()
 
-        self.att_deocder = att_deocder(
-            encode_size=out_dim,
-            dec_dim=512,
-            att_dim=1024,
-            vocab_size=output_size,
-            init_adadelta=True,
-            ctc_weight=0.5,
-            attention="dot",
-            decoder="LSTM",
-            emb_drop=0,
-        )
+        # self.att_deocder = att_deocder(
+        #     encode_size=out_dim,
+        #     dec_dim=512,
+        #     att_dim=1024,
+        #     vocab_size=output_size,
+        #     init_adadelta=True,
+        #     ctc_weight=0.5,
+        #     attention="dot",
+        #     decoder="LSTM",
+        #     emb_drop=0,
+        # )
 
         self.CTCLossFunction = [SmoothCTCLoss(output_size, blank=0)]
         self.CELossFunction = [SmoothCrossEntropyLoss()]
