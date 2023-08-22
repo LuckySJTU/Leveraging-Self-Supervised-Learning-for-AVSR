@@ -3,7 +3,7 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR_test'#
+args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR_permute'#
 args["DATA_DIRECTORY"] = "/home/xcpan/server_1/LRS2/mvlrs_v1"
 args["HDF5_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/LRS2.h5"
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"

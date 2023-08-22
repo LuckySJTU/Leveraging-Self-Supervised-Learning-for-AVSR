@@ -21,6 +21,7 @@ from data.lrs2_dataset import LRS2
 from data.utils import collate_fn
 from models.V2Vft import VisFeatureExtractionModel
 from models.LAS import att_deocder
+from models.utils import MaskedLayerNorm, outputConv, PositionalEncoding, generate_square_subsequent_mask
 from utils.decoders import ctc_greedy_decode, teacher_forcing_attention_decode
 from utils.label_smoothing import SmoothCTCLoss, SmoothCrossEntropyLoss
 from utils.metrics import compute_error_ch, compute_error_word
@@ -96,6 +97,20 @@ class V2V(pl.LightningModule):
         self.alpha = ALPHA
         self.eosIdx = eosIdx
         self.spaceIdx = spaceIdx
+        self.EncoderPositionalEncoding = PositionalEncoding(dModel=hidden_dim, maxLen=500) #peMaxLen
+        tx_norm = nn.LayerNorm(hidden_dim)
+        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        self.videoEncoder = nn.TransformerEncoder(videoEncoderLayer, num_layers=6, norm=tx_norm)
+        self.maskedLayerNorm = MaskedLayerNorm()
+        self.jointOutputConv = outputConv(self.maskedLayerNorm, hidden_dim, output_size)
+        self.decoderPositionalEncoding = PositionalEncoding(dModel=hidden_dim, maxLen=500)
+        self.embed = torch.nn.Sequential(
+            nn.Embedding(output_size, hidden_dim),
+            self.decoderPositionalEncoding
+        )
+        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=hidden_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
+        self.jointAttentionOutputConv = outputConv("LN", hidden_dim, output_size)
 
 
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
@@ -113,6 +128,7 @@ class V2V(pl.LightningModule):
         # inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
         x = list(torch.split(x, vidLen.tolist(), dim=0))
         x, inputLenBatch, mask = self.makePadding(x, vidLen)
+        # x: b*T*D
 
         # vsr, _ = self.biGRU(x.permute(0, 2, 1))
         # vsr = self.dropout(vsr)
@@ -123,22 +139,39 @@ class V2V(pl.LightningModule):
         # vsr = self.vsr_bert(inputs_embeds=x.permute(0,2,1)) # batch*512*length
         # vsr = vsr.logits
 
-        teacher = F.one_hot(targetinBatch.long()) if targetinBatch is not None else None
+        # teacher = F.one_hot(targetinBatch.long()) if targetinBatch is not None else None
         
-        vsr, att, att_seq, dec_state = self.att_deocder(
-            x, 
-            vidLen, 
-            targetinBatch.shape[-1] if targetinBatch is not None else max(target_lengths), 
-            tf_rate=teacher_forcing, 
-            teacher=teacher,
-        )
+        # vsr, att, att_seq, dec_state = self.att_deocder(
+        #     x, 
+        #     vidLen, 
+        #     targetinBatch.shape[-1] if targetinBatch is not None else max(target_lengths), 
+        #     tf_rate=teacher_forcing, 
+        #     teacher=teacher,
+        # )
+
         # att = self.att_proj(att)
 
         # encoder_out = {"encoder_out": [x.permute(2,0,1)], "encoder_padding_mask": padding_mask}
         # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
 
+        if isinstance(self.maskedLayerNorm, MaskedLayerNorm):
+            self.maskedLayerNorm.SetMaskandLength(mask, inputLenBatch)
+        # videoBatch = x.transpose(1, 2)
+        # videoBatch = self.videoConv(videoBatch)
+        # videoBatch = videoBatch.transpose(1, 2).transpose(0, 1)
+        x = self.EncoderPositionalEncoding(x.permute(1,0,2))
+        x = self.videoEncoder(x, src_key_padding_mask=mask)
+        vsr = self.jointOutputConv(x.permute(0,2,1))
+        vsr = F.log_softmax(vsr.permute(1, 0, 2), dim=-1)
+        targetinBatch = self.embed(targetinBatch.transpose(0, 1))
+        targetinMask = self.makeMaskfromLength(targetinBatch.shape[:-1][::-1], target_lengths, self.device)
+        squareMask = generate_square_subsequent_mask(targetinBatch.shape[0], self.device)
+        att = self.jointAttentionDecoder(targetinBatch, x, tgt_mask=squareMask, tgt_key_padding_mask=targetinMask, memory_key_padding_mask=mask)
+        # att: T*B*D
+        att = self.jointAttentionOutputConv(att.permute(1,2,0)) # input: B*D*T, output: B*V*T
+        att = att.permute(0,2,1) # B*T*V
 
-        return inputLenBatch, (F.log_softmax(vsr.permute(1, 0, 2), dim=-1), att)
+        return inputLenBatch, (vsr, att)
 
 
     def training_step(self, batch, batch_idx):
