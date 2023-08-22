@@ -97,20 +97,20 @@ class V2V(pl.LightningModule):
         self.alpha = ALPHA
         self.eosIdx = eosIdx
         self.spaceIdx = spaceIdx
-        self.EncoderPositionalEncoding = PositionalEncoding(dModel=hidden_dim, maxLen=500) #peMaxLen
-        tx_norm = nn.LayerNorm(hidden_dim)
-        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        self.EncoderPositionalEncoding = PositionalEncoding(dModel=out_dim, maxLen=500) #peMaxLen
+        tx_norm = nn.LayerNorm(out_dim)
+        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=out_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.videoEncoder = nn.TransformerEncoder(videoEncoderLayer, num_layers=6, norm=tx_norm)
         self.maskedLayerNorm = MaskedLayerNorm()
-        self.jointOutputConv = outputConv(self.maskedLayerNorm, hidden_dim, output_size)
-        self.decoderPositionalEncoding = PositionalEncoding(dModel=hidden_dim, maxLen=500)
+        self.jointOutputConv = outputConv(self.maskedLayerNorm, out_dim, output_size)
+        self.decoderPositionalEncoding = PositionalEncoding(dModel=out_dim, maxLen=500)
         self.embed = torch.nn.Sequential(
-            nn.Embedding(output_size, hidden_dim),
+            nn.Embedding(output_size, out_dim),
             self.decoderPositionalEncoding
         )
-        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=hidden_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=out_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
-        self.jointAttentionOutputConv = outputConv("LN", hidden_dim, output_size)
+        self.jointAttentionOutputConv = outputConv("LN", out_dim, output_size)
 
 
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
@@ -161,8 +161,8 @@ class V2V(pl.LightningModule):
         # videoBatch = videoBatch.transpose(1, 2).transpose(0, 1)
         x = self.EncoderPositionalEncoding(x.permute(1,0,2))
         x = self.videoEncoder(x, src_key_padding_mask=mask)
-        vsr = self.jointOutputConv(x.permute(0,2,1))
-        vsr = F.log_softmax(vsr.permute(1, 0, 2), dim=-1)
+        vsr = self.jointOutputConv(x.permute(1,2,0))
+        vsr = F.log_softmax(vsr.permute(2,0,1), dim=-1)
         targetinBatch = self.embed(targetinBatch.transpose(0, 1))
         targetinMask = self.makeMaskfromLength(targetinBatch.shape[:-1][::-1], target_lengths, self.device)
         squareMask = generate_square_subsequent_mask(targetinBatch.shape[0], self.device)
