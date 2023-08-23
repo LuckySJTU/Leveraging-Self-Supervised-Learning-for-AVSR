@@ -37,13 +37,7 @@ def inference(model, evalLoader, device, logger, inferenceParams):
 
     model.eval()
     for batch, (inputBatch, targetinBatch, targetoutBatch, targetLenBatch) in enumerate(tqdm(evalLoader, leave=False, desc="Eval", ncols=75)):
-        if inferenceParams['modal'] == "AO":
-            inputBatch = (inputBatch[0].float().to(device), inputBatch[1].to(device), None, None)
-        elif inferenceParams['modal'] == "VO":
-            inputBatch = (None, None, inputBatch[2].float().to(device), inputBatch[3].to(device))
-        else:
-            inputBatch = \
-                (inputBatch[0].float().to(device), inputBatch[1].to(device), inputBatch[2].float().to(device), inputBatch[3].to(device))
+        inputBatch = (None, None, inputBatch[2].float().to(device), inputBatch[3].to(device))
         targetinBatch = targetinBatch.int().to(device)
         targetoutBatch = targetoutBatch.int().to(device)
         targetLenBatch = targetLenBatch.int().to(device)
@@ -55,7 +49,7 @@ def inference(model, evalLoader, device, logger, inferenceParams):
         with torch.no_grad():
             if inferenceParams["decodeType"] == "HYBRID":
                 predictionBatch, predictionLenBatch = \
-                    model.inference(inputBatch, False, device, Lambda, inferenceParams["beamWidth"], inferenceParams["eosIx"], 0)
+                    model.inference(inputBatch, Lambda, inferenceParams["beamWidth"], inferenceParams["eosIx"], 0)
             elif inferenceParams["decodeType"] == "ATTN":
                 predictionBatch, predictionLenBatch = \
                     model.attentionAutoregression(inputBatch, False, device, inferenceParams["eosIx"])

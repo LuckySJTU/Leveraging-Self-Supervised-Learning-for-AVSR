@@ -15,13 +15,13 @@ args["MOCO_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_v2_200ep_pretrain.
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [0, 1, 2, 3]#,4,5,6,7
+args["GPU_IDS"] = [0, 1, 2, 3,4,5,6,7]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
-args["BATCH_SIZE"] = 8
+args["BATCH_SIZE"] = 128
 args["STEP_SIZE"] = 16384
-args["INIT_LR"] = 1e-3
+args["INIT_LR"] = 1e-4
 
 """
     For LRW
@@ -55,7 +55,7 @@ args["BEAM_WIDTH"] = 5
 args["TEST_WITH_NOISE"] = False
 args["TEST_NOISE_SNR_DB"] = 5
 args["DECODE_TYPE"] = "HYBRID"  # HYBRID ATTN TFATTN CTC
-args["EVAL_LRS2_MODEL_FILE"] = None#/home/yxwang/train-step_0262-wer_0.893.ckpt
+args["EVAL_LRS2_MODEL_FILE"] = "/home/yxwang/LSSLAVSRcheckpoints/models/train-step_0094-wer_0.992.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt
 
 """
     For me

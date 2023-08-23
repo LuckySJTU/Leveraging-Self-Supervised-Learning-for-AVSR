@@ -164,8 +164,8 @@ class V2V(pl.LightningModule):
         vsr = self.jointOutputConv(x.permute(1,2,0))
         vsr = F.log_softmax(vsr.permute(2,0,1), dim=-1)
         targetinBatch = self.embed(targetinBatch.transpose(0, 1))
-        targetinMask = self.makeMaskfromLength(targetinBatch.shape[:-1][::-1], target_lengths, self.device)
-        squareMask = generate_square_subsequent_mask(targetinBatch.shape[0], self.device)
+        targetinMask = self.makeMaskfromLength(targetinBatch.shape[:-1][::-1], target_lengths, x.device)
+        squareMask = generate_square_subsequent_mask(targetinBatch.shape[0], x.device)
         att = self.jointAttentionDecoder(targetinBatch, x, tgt_mask=squareMask, tgt_key_padding_mask=targetinMask, memory_key_padding_mask=mask)
         # att: T*B*D
         att = self.jointAttentionOutputConv(att.permute(1,2,0)) # input: B*D*T, output: B*V*T
@@ -195,9 +195,6 @@ class V2V(pl.LightningModule):
         self.log("info/train_ctcloss", ctcloss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("info/train_celoss", celoss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("info/train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        if loss==torch.nan:
-            print(loss)
-
         predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0].detach(), inputLenBatch, self.eosIdx)
         c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
         self.log("CER/train_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
@@ -286,7 +283,7 @@ class V2V(pl.LightningModule):
 
         videoBatch = pad_sequence(videoBatch, batch_first=True)
         inputLenBatch = (vidLen + vidPadding).long()
-        mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, self.device)
+        mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, device)
         return videoBatch, inputLenBatch, mask
     
     def makeMaskfromLength(self, maskShape, maskLength, maskDevice):
@@ -338,9 +335,9 @@ def main():
         logger=writer,
         default_root_dir=args["CODE_DIRECTORY"],
         callbacks=callback_list,
-        accelerator="ddp",
+        accelerator="dp",
         #fast_dev_run=True,
-        plugins=DDPPlugin(find_unused_parameters=False), #if args["MODAL"] == "VO" else True
+        #plugins=DDPPlugin(find_unused_parameters=False), #if args["MODAL"] == "VO" else True
     )
     trainer.fit(model, LRS2Dataloader)
     return

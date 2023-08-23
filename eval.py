@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from config import args
 from data.lrs2_dataset import LRS2
 from data.utils import collate_fn
-from models.av_net import AVNet
+from models.V2Vft import V2V
 from utils.general import inference
 
 
@@ -36,9 +36,15 @@ def main():
         logger.info("\nTrained Model File: %s" % (args["EVAL_LRS2_MODEL_FILE"]))
 
         # declaring the model,loss function and loading the trained model weights
-        modelargs = (args["DMODEL"], args["TX_ATTENTION_HEADS"], args["TX_NUM_LAYERS"], args["PE_MAX_LENGTH"], args["AUDIO_FEATURE_SIZE"],
-                     args["VIDEO_FEATURE_SIZE"], args["TX_FEEDFORWARD_DIM"], args["TX_DROPOUT"], args["CHAR_NUM_CLASSES"])
-        model = AVNet(args['MODAL'], args['WAV2VEC_FILE'], args['MOCO_FRONTEND_FILE'], args["MAIN_REQ_INPUT_LENGTH"], modelargs)
+        model = V2V(
+            args['dropout_features'], 
+            args['frontend'], 
+            args["CHAR_NUM_CLASSES"], 
+            args["MAIN_REQ_INPUT_LENGTH"], 
+            args["ALPHA"], 
+            args["CHAR_TO_INDEX"]["<EOS>"],
+            args["CHAR_TO_INDEX"][" "],
+        )
         stateDict = torch.load(args["EVAL_LRS2_MODEL_FILE"], map_location=device)['state_dict']
         msg = model.load_state_dict(stateDict, strict=False)
         print(msg)
