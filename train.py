@@ -19,7 +19,7 @@ from torch_warmup_lr import WarmupLR
 from config import args
 from data.lrs2_dataset import LRS2
 from data.utils import collate_fn
-from models.V2Vft import VisFeatureExtractionModel
+from models.V2Vft import VisFeatureExtractionModel, conv1dLayers
 from models.LAS import att_deocder
 from models.utils import MaskedLayerNorm, outputConv, PositionalEncoding, generate_square_subsequent_mask
 from utils.decoders import ctc_greedy_decode, teacher_forcing_attention_decode
@@ -90,6 +90,8 @@ class V2V(pl.LightningModule):
         #     decoder="LSTM",
         #     emb_drop=0,
         # )
+        self.frontend = frontend
+        dModel = 512
 
         self.CTCLossFunction = [SmoothCTCLoss(output_size, blank=0)]
         self.CELossFunction = [SmoothCrossEntropyLoss()]
@@ -97,20 +99,21 @@ class V2V(pl.LightningModule):
         self.alpha = ALPHA
         self.eosIdx = eosIdx
         self.spaceIdx = spaceIdx
-        self.EncoderPositionalEncoding = PositionalEncoding(dModel=out_dim, maxLen=500) #peMaxLen
-        tx_norm = nn.LayerNorm(out_dim)
-        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=out_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        self.EncoderPositionalEncoding = PositionalEncoding(dModel=dModel, maxLen=500) #peMaxLen
+        tx_norm = nn.LayerNorm(dModel)
+        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=dModel, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.videoEncoder = nn.TransformerEncoder(videoEncoderLayer, num_layers=6, norm=tx_norm)
         self.maskedLayerNorm = MaskedLayerNorm()
-        self.jointOutputConv = outputConv(self.maskedLayerNorm, out_dim, output_size)
-        self.decoderPositionalEncoding = PositionalEncoding(dModel=out_dim, maxLen=500)
+        self.videoConv = conv1dLayers(self.maskedLayerNorm, out_dim, dModel, dModel)
+        self.jointOutputConv = outputConv(self.maskedLayerNorm, dModel, output_size)
+        self.decoderPositionalEncoding = PositionalEncoding(dModel=dModel, maxLen=500)
         self.embed = torch.nn.Sequential(
-            nn.Embedding(output_size, out_dim),
+            nn.Embedding(output_size, dModel),
             self.decoderPositionalEncoding
         )
-        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=out_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=dModel, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
-        self.jointAttentionOutputConv = outputConv("LN", out_dim, output_size)
+        self.jointAttentionOutputConv = outputConv("LN", dModel, output_size)
 
 
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
@@ -156,11 +159,16 @@ class V2V(pl.LightningModule):
 
         if isinstance(self.maskedLayerNorm, MaskedLayerNorm):
             self.maskedLayerNorm.SetMaskandLength(mask, inputLenBatch)
-        # videoBatch = x.transpose(1, 2)
-        # videoBatch = self.videoConv(videoBatch)
-        # videoBatch = videoBatch.transpose(1, 2).transpose(0, 1)
-        x = self.EncoderPositionalEncoding(x.permute(1,0,2))
+        
+        if self.frontend == 'resnet18':
+            x = self.EncoderPositionalEncoding(x.permute(1,0,2))
+        elif self.frontend == "resnet50":
+            x = x.transpose(1, 2)
+            x = self.videoConv(x)
+            x = x.transpose(1, 2).transpose(0, 1)
+            x = self.EncoderPositionalEncoding(x)#.permute(1,0,2)
         x = self.videoEncoder(x, src_key_padding_mask=mask)
+        # T*B*D
         vsr = self.jointOutputConv(x.permute(1,2,0))
         vsr = F.log_softmax(vsr.permute(2,0,1), dim=-1)
         targetinBatch = self.embed(targetinBatch.transpose(0, 1))

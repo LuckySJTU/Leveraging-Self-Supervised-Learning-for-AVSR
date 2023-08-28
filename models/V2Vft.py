@@ -26,6 +26,56 @@ class ReplicationPad3D(nn.Module):
     def forward(self,x):
         return F.pad(x,(0,0,0,0,self.leftpad,self.rightpad),"replicate")
     
+class TransposeLast(nn.Module):
+    def __init__(self, deconstruct_idx=None):
+        super().__init__()
+        self.deconstruct_idx = deconstruct_idx
+
+    def forward(self, x):
+        if self.deconstruct_idx is not None:
+            x = x[self.deconstruct_idx]
+        return x.transpose(-2, -1)
+
+class Fp32LayerNorm(nn.LayerNorm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, input):
+        output = F.layer_norm(
+            input.float(),
+            self.normalized_shape,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        )
+        return output.type_as(input)
+
+class Fp32GroupNorm(nn.GroupNorm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, input):
+        output = F.group_norm(
+            input.float(),
+            self.num_groups,
+            self.weight.float() if self.weight is not None else None,
+            self.bias.float() if self.bias is not None else None,
+            self.eps,
+        )
+        return output.type_as(input)
+
+def norm_block(is_layer_norm, dim, affine=True):
+    if is_layer_norm:
+        mod = nn.Sequential(
+            TransposeLast(),
+            Fp32LayerNorm(dim, elementwise_affine=affine),
+            TransposeLast(),
+        )
+    else:
+        mod = Fp32GroupNorm(1, dim, affine=affine)
+
+    return mod
+
 class Conv3DAggegator(nn.Module):
     def __init__(
             self,
@@ -54,9 +104,12 @@ class Conv3DAggegator(nn.Module):
             return nn.Sequential(
                 pad,
                 nn.Conv3d(n_in, n_out, k, stride=stride, bias=conv_bias),
-                nn.Dropout(p=dropout),
-                #norm_block(True, n_out, affine=not non_affine_group_norm),
-                #activation,
+                # nn.Dropout(p=dropout),
+                # norm_block(True, n_out, affine=not non_affine_group_norm),
+                # activation,
+                nn.BatchNorm3d(n_out),
+                nn.ReLU(True),
+                nn.MaxPool3d(kernel_size=(1,3,3),stride=(1,1,1),padding=(0,1,1))
             )
 
         in_d = embed
@@ -64,7 +117,7 @@ class Conv3DAggegator(nn.Module):
         self.residual_proj = nn.ModuleList()
         for dim, k, stride in conv_layers:
             if in_d != dim and skip_connections:
-                self.residual_proj.append(nn.Conv3d(in_d, dim, 1, bias=False))
+                self.residual_proj.append(nn.Conv3d(in_d, dim, k, stride, bias=False))
             else:
                 self.residual_proj.append(None)
 
@@ -128,6 +181,24 @@ class VisFeatureExtractionModel(nn.Module):
 
         # refer models/moco_visual_frontend.py
 
+class conv1dLayers(nn.Module):
+    def __init__(self, MaskedNormLayer, inD, dModel, outD, downsample=False):
+        super(conv1dLayers, self).__init__()
+        if downsample:
+            kernel_stride = 2
+        else:
+            kernel_stride = 1
+        self.conv = nn.Sequential(
+            nn.Conv1d(inD, dModel, kernel_size=(kernel_stride,), stride=(kernel_stride,), padding=(0,)),
+            TransposeLayer(1, 2),
+            MaskedNormLayer,
+            TransposeLayer(1, 2),
+            nn.ReLU(True),
+            nn.Conv1d(dModel, outD, kernel_size=(1,), stride=(1,), padding=(0,))
+        )
+
+    def forward(self, inputBatch):
+        return self.conv(inputBatch)
     
 class V2V(nn.Module):
 
@@ -377,68 +448,21 @@ class V2V(nn.Module):
         mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
         return mask
 
-    def makePadding(self, audioBatch, audLen, videoBatch, vidLen):
-        if self.modal == "AO":
-            audPadding = audLen % 2
-            mask = (audPadding + audLen) > 2 * self.reqInpLen
-            audPadding = mask * audPadding + (~mask) * (2 * self.reqInpLen - audLen)
-            audLeftPadding = torch.floor(torch.div(audPadding, 2)).int()
-            audRightPadding = torch.ceil(torch.div(audPadding, 2)).int()
+    def makePadding(self, videoBatch, vidLen):
+        vidPadding = torch.zeros(len(videoBatch)).long().to(vidLen.device)
 
-            audioBatch = audioBatch.unsqueeze(1).unsqueeze(1)
-            audioBatch = list(audioBatch)
-            for i, _ in enumerate(audioBatch):
-                pad = nn.ReplicationPad2d(padding=(0, 0, audLeftPadding[i], audRightPadding[i]))
-                audioBatch[i] = pad(audioBatch[i][:, :, :audLen[i]]).squeeze(0).squeeze(0)
+        mask = (vidPadding + vidLen) > self.reqInpLen
+        vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
 
-            audioBatch = pad_sequence(audioBatch, batch_first=True)
-            inputLenBatch = ((audLen + audPadding) // 2).long()
-            mask = self.makeMaskfromLength([audioBatch.shape[0]] + [audioBatch.shape[1] // 2], inputLenBatch, audioBatch.device)
+        vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
+        vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
 
-        elif self.modal == "VO":
-            vidPadding = torch.zeros(len(videoBatch)).long().to(vidLen.device)
+        for i, _ in enumerate(videoBatch):
+            pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
+            videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
 
-            mask = (vidPadding + vidLen) > self.reqInpLen
-            vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
+        videoBatch = pad_sequence(videoBatch, batch_first=True)
+        inputLenBatch = (vidLen + vidPadding).long()
+        mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, videoBatch.device)
 
-            vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
-            vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
-
-            for i, _ in enumerate(videoBatch):
-                pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
-                videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
-
-            videoBatch = pad_sequence(videoBatch, batch_first=True)
-            inputLenBatch = (vidLen + vidPadding).long()
-            mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, videoBatch.device)
-
-        else:
-            dismatch = audLen - 2 * vidLen
-            vidPadding = torch.ceil(torch.div(dismatch, 2)).int()
-            vidPadding = vidPadding * (vidPadding > 0)
-            audPadding = 2 * vidPadding - dismatch
-
-            mask = (vidPadding + vidLen) > self.reqInpLen
-            vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
-            mask = (audPadding + audLen) > 2 * self.reqInpLen
-            audPadding = mask * audPadding + (~mask) * (2 * self.reqInpLen - audLen)
-
-            vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
-            vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
-            audLeftPadding = torch.floor(torch.div(audPadding, 2)).int()
-            audRightPadding = torch.ceil(torch.div(audPadding, 2)).int()
-
-            audioBatch = audioBatch.unsqueeze(1).unsqueeze(1)
-            audioBatch = list(audioBatch)
-            for i, _ in enumerate(audioBatch):
-                pad = nn.ReplicationPad2d(padding=(0, 0, audLeftPadding[i], audRightPadding[i]))
-                audioBatch[i] = pad(audioBatch[i][:, :, :audLen[i]]).squeeze(0).squeeze(0)
-                pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
-                videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
-
-            audioBatch = pad_sequence(audioBatch, batch_first=True)
-            videoBatch = pad_sequence(videoBatch, batch_first=True)
-            inputLenBatch = (vidLen + vidPadding).long()
-            mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, videoBatch.device)
-
-        return audioBatch, videoBatch, inputLenBatch, mask
+        return videoBatch, inputLenBatch, mask
