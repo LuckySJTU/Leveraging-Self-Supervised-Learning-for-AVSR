@@ -315,9 +315,15 @@ class V2V(nn.Module):
         if isinstance(self.maskedLayerNorm, MaskedLayerNorm):
             self.maskedLayerNorm.SetMaskandLength(mask, inputLenBatch)
 
-        encodedBatch = self.EncoderPositionalEncoding(encodedBatch.permute(1,0,2))
+        if self.frontend == 'resnet18':
+            encodedBatch = self.EncoderPositionalEncoding(encodedBatch.permute(1,0,2))
+        elif self.frontend == "resnet50":
+            encodedBatch = encodedBatch.transpose(1, 2)
+            encodedBatch = self.videoConv(encodedBatch)
+            encodedBatch = encodedBatch.transpose(1, 2).transpose(0, 1)
+            encodedBatch = self.EncoderPositionalEncoding(encodedBatch)#.permute(1,0,2)
         encodedBatch = self.videoEncoder(encodedBatch, src_key_padding_mask=mask)
-
+        
         CTCOutputConv = self.jointOutputConv
         attentionDecoder = self.jointAttentionDecoder
         attentionOutputConv = self.jointAttentionOutputConv
