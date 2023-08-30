@@ -235,6 +235,8 @@ class V2V(nn.Module):
         #     decoder="LSTM",
         #     emb_drop=0,
         # )
+        self.frontend = frontend
+        dModel = 512
 
         self.CTCLossFunction = [SmoothCTCLoss(output_size, blank=0)]
         self.CELossFunction = [SmoothCrossEntropyLoss()]
@@ -242,20 +244,21 @@ class V2V(nn.Module):
         self.alpha = ALPHA
         self.eosIdx = eosIdx
         self.spaceIdx = spaceIdx
-        self.EncoderPositionalEncoding = PositionalEncoding(dModel=out_dim, maxLen=500) #peMaxLen
-        tx_norm = nn.LayerNorm(out_dim)
-        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=out_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        self.EncoderPositionalEncoding = PositionalEncoding(dModel=dModel, maxLen=500) #peMaxLen
+        tx_norm = nn.LayerNorm(dModel)
+        videoEncoderLayer = nn.TransformerEncoderLayer(d_model=dModel, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.videoEncoder = nn.TransformerEncoder(videoEncoderLayer, num_layers=6, norm=tx_norm)
         self.maskedLayerNorm = MaskedLayerNorm()
-        self.jointOutputConv = outputConv(self.maskedLayerNorm, out_dim, output_size)
-        self.decoderPositionalEncoding = PositionalEncoding(dModel=out_dim, maxLen=500)
+        self.videoConv = conv1dLayers(self.maskedLayerNorm, out_dim, dModel, dModel)
+        self.jointOutputConv = outputConv(self.maskedLayerNorm, dModel, output_size)
+        self.decoderPositionalEncoding = PositionalEncoding(dModel=dModel, maxLen=500)
         self.embed = torch.nn.Sequential(
-            nn.Embedding(output_size, out_dim),
+            nn.Embedding(output_size, dModel),
             self.decoderPositionalEncoding
         )
-        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=out_dim, nhead=8, dim_feedforward=1024, dropout=0.1)
+        jointDecoderLayer = nn.TransformerDecoderLayer(d_model=dModel, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
-        self.jointAttentionOutputConv = outputConv("LN", out_dim, output_size)
+        self.jointAttentionOutputConv = outputConv("LN", dModel, output_size)
 
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
         _, _, source, vidLen = source
@@ -274,7 +277,14 @@ class V2V(nn.Module):
         if isinstance(self.maskedLayerNorm, MaskedLayerNorm):
             self.maskedLayerNorm.SetMaskandLength(mask, inputLenBatch)
 
-        x = self.EncoderPositionalEncoding(x.permute(1,0,2))
+        if self.frontend == 'resnet18':
+            x = self.EncoderPositionalEncoding(x.permute(1,0,2))
+        elif self.frontend == "resnet50":
+            x = x.transpose(1, 2)
+            x = self.videoConv(x)
+            x = x.transpose(1, 2).transpose(0, 1)
+            x = self.EncoderPositionalEncoding(x)#.permute(1,0,2)
+
         x = self.videoEncoder(x, src_key_padding_mask=mask)
         vsr = self.jointOutputConv(x.permute(1,2,0))
         vsr = F.log_softmax(vsr.permute(2,0,1), dim=-1)
