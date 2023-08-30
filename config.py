@@ -15,11 +15,11 @@ args["MOCO_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_v2_200ep_pretrain.
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [0, 1]#, 2, 3,4,5,6,7
+args["GPU_IDS"] = [0, 1, 2, 3,4,5,6,7]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
-args["BATCH_SIZE"] = 16
+args["BATCH_SIZE"] = 32
 args["STEP_SIZE"] = 16384
 args["INIT_LR"] = 1e-4
 
