@@ -63,8 +63,8 @@ class TransposeLayer(nn.Module):
 class MaskedLayerNorm(nn.Module):
     def __init__(self, eps=1e-5):
         super(MaskedLayerNorm, self).__init__()
-        self.register_buffer('mask', None, persistent=False)
-        self.register_buffer('inputLenBatch', None, persistent=False)
+        # self.register_buffer('mask', None, persistent=False)
+        # self.register_buffer('inputLenBatch', None, persistent=False)
         self.eps = eps
 
     def SetMaskandLength(self, mask, inputLenBatch):
