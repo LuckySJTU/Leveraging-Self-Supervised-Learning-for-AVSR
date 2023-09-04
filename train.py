@@ -59,7 +59,9 @@ class LRS2Lightning(pl.LightningDataModule):
 
 class V2V(pl.LightningModule):
     def __init__(self, dropout_features, frontend, output_size, reqInpLen, ALPHA, eosIdx, spaceIdx):
+        # any change should be syned with V2Vft class in models/V2Vft.py
         super(V2V, self).__init__()
+
         self.feature_extractor = VisFeatureExtractionModel(frontend)
         self.dropout_feats = nn.Dropout(p=dropout_features)
 
@@ -343,9 +345,9 @@ def main():
         logger=writer,
         default_root_dir=args["CODE_DIRECTORY"],
         callbacks=callback_list,
-        accelerator="dp",
+        accelerator="ddp",
         #fast_dev_run=True,
-        #plugins=DDPPlugin(find_unused_parameters=False), #if args["MODAL"] == "VO" else True
+        plugins=DDPPlugin(find_unused_parameters=False), #if args["MODAL"] == "VO" else True
     )
     trainer.fit(model, LRS2Dataloader)
     return

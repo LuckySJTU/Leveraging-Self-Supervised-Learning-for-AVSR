@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from config import args
 from data.lrs2_dataset import LRS2
 from data.utils import collate_fn
-from models.V2Vft import V2V
+from models.V2Vft import V2Vft
 from utils.general import inference
 
 
@@ -36,7 +36,7 @@ def main():
         logger.info("\nTrained Model File: %s" % (args["EVAL_LRS2_MODEL_FILE"]))
 
         # declaring the model,loss function and loading the trained model weights
-        model = V2V(
+        model = V2Vft(
             args['dropout_features'], 
             args['frontend'], 
             args["CHAR_NUM_CLASSES"], 

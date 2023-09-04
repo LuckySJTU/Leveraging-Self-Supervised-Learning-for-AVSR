@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pad_sequence
 import torchvision.models as models
 import math
 from models.utils import *
+from models.wav2vec import Wav2VecPredictionsModel
 from utils.label_smoothing import SmoothCrossEntropyLoss, SmoothCTCLoss
 from utils.decoders import compute_CTC_prob
 import numpy as np
@@ -137,6 +138,75 @@ class Conv3DAggegator(nn.Module):
                 x = (x + residual) * self.residual_scale
         return x
 
+
+class ZeroPad1d(nn.Module):
+    def __init__(self, pad_left, pad_right):
+        super().__init__()
+        self.pad_left = pad_left
+        self.pad_right = pad_right
+
+    def forward(self, x):
+        return F.pad(x, (self.pad_left, self.pad_right))
+
+
+class ConvAggegator(nn.Module):
+    def __init__(
+            self,
+            conv_layers,
+            embed,
+            dropout,
+            skip_connections,
+            residual_scale,
+            non_affine_group_norm,
+            conv_bias,
+            zero_pad,
+            activation,
+    ):
+        super().__init__()
+
+        def block(n_in, n_out, k, stride):
+            # padding dims only really make sense for stride = 1
+            ka = k // 2
+            kb = ka - 1 if k % 2 == 0 else ka
+
+            pad = (
+                ZeroPad1d(ka + kb, 0) if zero_pad else nn.ReplicationPad1d((ka + kb, 0))
+            )
+
+            return nn.Sequential(
+                pad,
+                nn.Conv1d(n_in, n_out, k, stride=stride, bias=conv_bias),
+                nn.Dropout(p=dropout),
+                norm_block(True, n_out, affine=not non_affine_group_norm),
+                activation,
+            )
+
+        in_d = embed
+        self.conv_layers = nn.ModuleList()
+        self.residual_proj = nn.ModuleList()
+        for dim, k, stride in conv_layers:
+            if in_d != dim and skip_connections:
+                self.residual_proj.append(nn.Conv1d(in_d, dim, 1, bias=False))
+            else:
+                self.residual_proj.append(None)
+
+            self.conv_layers.append(block(in_d, dim, k, stride))
+            in_d = dim
+        self.conv_layers = nn.Sequential(*self.conv_layers)
+        self.skip_connections = skip_connections
+        self.residual_scale = math.sqrt(residual_scale)
+
+    def forward(self, x): #16*2048*29
+        for rproj, conv in zip(self.residual_proj, self.conv_layers):
+            residual = x
+            x = conv(x)
+            if self.skip_connections:
+                if rproj is not None:
+                    residual = rproj(residual)
+                x = (x + residual) * self.residual_scale
+        return x
+
+
 class VisFeatureExtractionModel(nn.Module):
     def __init__(self, frontend):
         super(VisFeatureExtractionModel, self).__init__()
@@ -181,6 +251,7 @@ class VisFeatureExtractionModel(nn.Module):
 
         # refer models/moco_visual_frontend.py
 
+
 class conv1dLayers(nn.Module):
     def __init__(self, MaskedNormLayer, inD, dModel, outD, downsample=False):
         super(conv1dLayers, self).__init__()
@@ -199,11 +270,106 @@ class conv1dLayers(nn.Module):
 
     def forward(self, inputBatch):
         return self.conv(inputBatch)
-    
+
+
+def make_aggregator(embed_dim, dropout, skip_connections_agg, residual_scale, non_affine_group_norm, no_conv_bias, agg_zero_pad, activation):
+    agg_layers = [(512, 2, 1), (512, 3, 1), (512, 4, 1), (512,5,1),(512,6,1)]
+    agg_dim = agg_layers[-1][0]
+    feature_aggregator = ConvAggegator(
+        conv_layers=agg_layers,
+        embed=embed_dim,
+        dropout=dropout, # 0
+        skip_connections=skip_connections_agg, # True
+        residual_scale=residual_scale, #0.5
+        non_affine_group_norm=non_affine_group_norm, # False
+        conv_bias=not no_conv_bias, # not False
+        zero_pad=agg_zero_pad, # False
+        activation=activation,
+    )
+
+    return feature_aggregator, agg_dim
+
 class V2V(nn.Module):
+    def __init__(self, dropout_features, frontend):
+        super(V2V, self).__init__()
+        self.feature_extractor = VisFeatureExtractionModel(frontend)
+        self.dropout_feats = nn.Dropout(p=dropout_features)
+        hidden_dim = {
+            "resnet18":512,
+            "resnet50":2048,
+        }
+        agg_dim = 512
+        embed_dim = hidden_dim[frontend]
+        prediction_steps = 3
+        num_negatives = 3 # default 5
+        cross_sample_negatives = 0
+        sample_distance = None
+        dropout = 0.1 # default 0
+        offset = 1
+        balanced_classes = False
+        infonce = False
+        skip_connections_agg = True
+        residual_scale = 0.5
+        non_affine_group_norm = False
+        no_conv_bias = False
+        agg_zero_pad = False
+        activation = nn.ReLU()
+
+        self.feature_aggregator, agg_dim = make_aggregator(
+            embed_dim, 
+            dropout, 
+            skip_connections_agg, 
+            residual_scale, 
+            non_affine_group_norm, 
+            no_conv_bias, 
+            agg_zero_pad, 
+            activation
+        )
+        self.dropout_agg = nn.Dropout(p=dropout_features)
+        self.wav2vec_predictions = Wav2VecPredictionsModel(
+            in_dim=agg_dim,
+            out_dim=embed_dim,
+            prediction_steps=prediction_steps,
+            n_negatives=num_negatives,
+            cross_sample_negatives=cross_sample_negatives,
+            sample_distance=sample_distance,
+            dropout=dropout,
+            offset=offset,
+            balanced_classes=balanced_classes,
+            infonce=infonce,
+        )
+    
+    def forward(self, source, sizes, target):
+        result = {} #source: 16*29*1*112*112
+        frames = sizes[0]
+        features = self.feature_extractor(source) #464*2048
+
+        features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1) #16*2048*29
+        x = self.dropout_feats(features)
+        x = self.feature_aggregator(x) #16*512*29
+        x = self.dropout_agg(x)
+
+        # if self.project_features is not None:
+        #     features = self.project_features(features)
+        
+        logits, targets = self.wav2vec_predictions(x, features)
+        # features = F.softmax(features,dim=1) # 16*512*29
+
+        # result["cpc_logits"] = x #6624
+        # result["cpc_targets"] = targets #6624
+        # # result["features"] = features 
+
+        weights = None
+        reduction = None
+        loss = F.binary_cross_entropy_with_logits(
+                logits, target.float(), weights, reduction=reduction
+        )
+
+
+class V2Vft(nn.Module):
 
     def __init__(self, dropout_features, frontend, output_size, reqInpLen, ALPHA, eosIdx, spaceIdx):
-        super(V2V, self).__init__()
+        super(V2Vft, self).__init__()
         self.feature_extractor = VisFeatureExtractionModel(frontend)
         self.dropout_feats = nn.Dropout(p=dropout_features)
 
