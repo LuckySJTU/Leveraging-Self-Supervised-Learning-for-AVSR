@@ -55,7 +55,7 @@ args["BEAM_WIDTH"] = 5
 args["TEST_WITH_NOISE"] = False
 args["TEST_NOISE_SNR_DB"] = 5
 args["DECODE_TYPE"] = "HYBRID"  # HYBRID ATTN TFATTN CTC
-args["EVAL_LRS2_MODEL_FILE"] = "/home/yxwang/LSSLAVSR_resnet50checkpoints/models/train-step_0263-wer_0.954.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt
+args["EVAL_LRS2_MODEL_FILE"] = "/home/yxwang/LSSLAVSR_resnet50checkpoints/models/train-step_0999-wer_0.859.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt
 
 """
     For me
