@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils.rnn import pad_sequence
 import torchvision.models as models
 import math
@@ -10,6 +12,11 @@ from utils.label_smoothing import SmoothCrossEntropyLoss, SmoothCTCLoss
 from utils.decoders import compute_CTC_prob
 import numpy as np
 from tqdm import tqdm
+import pytorch_lightning as pl
+from utils.metrics import compute_error_ch, compute_error_word
+from utils.decoders import ctc_greedy_decode, teacher_forcing_attention_decode
+from torch_warmup_lr import WarmupLR
+from config import args
 
 class ZeroPad3D(nn.Module):
     def __init__(self,leftpad,rightpad):
@@ -289,7 +296,8 @@ def make_aggregator(embed_dim, dropout, skip_connections_agg, residual_scale, no
 
     return feature_aggregator, agg_dim
 
-class V2V(nn.Module):
+
+class V2V(pl.LightningModule):
     def __init__(self, dropout_features, frontend):
         super(V2V, self).__init__()
         self.feature_extractor = VisFeatureExtractionModel(frontend)
@@ -339,12 +347,10 @@ class V2V(nn.Module):
             infonce=infonce,
         )
     
-    def forward(self, source, sizes, target):
-        result = {} #source: 16*29*1*112*112
-        frames = sizes[0]
+    def forward(self, source, frame):
+        #source: 16*29*1*112*112
         features = self.feature_extractor(source) #464*2048
-
-        features = features.view(-1, frames, features.shape[-1]).permute(0, 2, 1) #16*2048*29
+        features = features.view(-1, frame, features.shape[-1]).permute(0, 2, 1) #16*2048*29
         x = self.dropout_feats(features)
         x = self.feature_aggregator(x) #16*512*29
         x = self.dropout_agg(x)
@@ -359,22 +365,85 @@ class V2V(nn.Module):
         # result["cpc_targets"] = targets #6624
         # # result["features"] = features 
 
-        weights = None
-        reduction = None
-        loss = F.binary_cross_entropy_with_logits(
-                logits, target.float(), weights, reduction=reduction
-        )
+        return logits, targets
+    
+    def training_step(self, batch, batch_idx):
+        inp, trgt = batch
+
+        inp = inp.float()
+        frame = inp.shape[1]
+        logits, targets = self(inp, frame)
+        target = targets.contiguous()
+
+        with torch.backends.cudnn.flags(enabled=False):
+            loss = F.binary_cross_entropy_with_logits(
+                    logits, target.float(), reduction="sum"
+                )
+        self.log("info/train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        inp, trgt = batch
+
+        inp = inp.float()
+        frame = inp.shape[1]
+        logits, targets = self(inp, frame)
+        target = targets.contiguous()
+
+        with torch.backends.cudnn.flags(enabled=False):
+            loss = F.binary_cross_entropy_with_logits(
+                    logits, target.float(), reduction="sum"
+                )
+        self.log("info/valid_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        return loss
+
+    def get_progress_bar_dict(self):
+        items = super().get_progress_bar_dict()
+        items.pop("v_num", None)
+        return items
+    
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=args["INIT_LR"], betas=(args["MOMENTUM1"], args["MOMENTUM2"]))
+        scheduler_reduce = ReduceLROnPlateau(optimizer, mode="min", factor=args["LR_SCHEDULER_FACTOR"], patience=args["LR_SCHEDULER_WAIT"],
+                                             threshold=args["LR_SCHEDULER_THRESH"], threshold_mode="abs", min_lr=args["FINAL_LR"], verbose=True)
+        if args["LRW_WARMUP_PERIOD"] > 0:
+            scheduler = WarmupLR(scheduler_reduce, init_lr=args["FINAL_LR"], num_warmup=args["LRS2_WARMUP_PERIOD"], warmup_strategy='cos')
+            scheduler.step(1)
+        else:
+            scheduler = scheduler_reduce
+
+        optim_dict = {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,  # The LR scheduler instance (required)
+                'interval': 'epoch',  # The unit of the scheduler's step size
+                'frequency': 1,  # The frequency of the scheduler
+                'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler
+                'monitor': 'info/valid_loss',
+                'strict': True,  # Whether to crash the training if `monitor` is not found
+                'name': None,  # Custom name for LearningRateMonitor to use
+            }
+        }
+        return optim_dict
 
 
-class V2Vft(nn.Module):
-
-    def __init__(self, dropout_features, frontend, output_size, reqInpLen, ALPHA, eosIdx, spaceIdx):
+class V2Vft(pl.LightningModule):
+    def __init__(self):
+        # any change should be syned with V2Vft class in models/V2Vft.py
         super(V2Vft, self).__init__()
+
+        dropout_features = args['dropout_features']
+        frontend = args['frontend']
+        output_size = args["CHAR_NUM_CLASSES"]
+        reqInpLen = args["MAIN_REQ_INPUT_LENGTH"]
+        ALPHA = args["ALPHA"]
+        eosIdx = args["CHAR_TO_INDEX"]["<EOS>"]
+        spaceIdx = args["CHAR_TO_INDEX"][" "]
+
         self.feature_extractor = VisFeatureExtractionModel(frontend)
         self.dropout_feats = nn.Dropout(p=dropout_features)
 
         self.vocab_size = output_size
-        self.numClasses = output_size
         
         hidden_dim = {
             "resnet18":512,
@@ -426,23 +495,50 @@ class V2Vft(nn.Module):
         self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
         self.jointAttentionOutputConv = outputConv("LN", dModel, output_size)
 
+
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
         _, _, source, vidLen = source
-        # frames = source.shape[1]
+        frames = source.shape[1]
         x = self.feature_extractor(source, vidLen)  # (B*N) x D
         x = self.dropout_feats(x)
-        # x = self.backbone.feature_aggregator(x)     # B x D x N
-        # x = self.backbone.dropout_agg(x)
+        x = self.backbone.feature_aggregator(x)     # B x D x N
+        x = self.backbone.dropout_agg(x)
         vsr = None
         att = None
 
+        # inputLenBatch = vidLen
+        # inputLenBatch = torch.clamp_min(inputLenBatch, self.reqInpLen)
         x = list(torch.split(x, vidLen.tolist(), dim=0))
         x, inputLenBatch, mask = self.makePadding(x, vidLen)
         # x: b*T*D
 
+        # vsr, _ = self.biGRU(x.permute(0, 2, 1))
+        # vsr = self.dropout(vsr)
+        # vsr = self.vsr_proj(vsr)
+
+        # vsr = self.vsr_proj(x.permute(0,2,1))
+
+        # vsr = self.vsr_bert(inputs_embeds=x.permute(0,2,1)) # batch*512*length
+        # vsr = vsr.logits
+
+        # teacher = F.one_hot(targetinBatch.long()) if targetinBatch is not None else None
+        
+        # vsr, att, att_seq, dec_state = self.att_deocder(
+        #     x, 
+        #     vidLen, 
+        #     targetinBatch.shape[-1] if targetinBatch is not None else max(target_lengths), 
+        #     tf_rate=teacher_forcing, 
+        #     teacher=teacher,
+        # )
+
+        # att = self.att_proj(att)
+
+        # encoder_out = {"encoder_out": [x.permute(2,0,1)], "encoder_padding_mask": padding_mask}
+        # att, otherArgs = self.lm_decoder(targets, encoder_out=encoder_out)
+
         if isinstance(self.maskedLayerNorm, MaskedLayerNorm):
             self.maskedLayerNorm.SetMaskandLength(mask, inputLenBatch)
-
+        
         if self.frontend == 'resnet18':
             x = self.EncoderPositionalEncoding(x.permute(1,0,2))
         elif self.frontend == "resnet50":
@@ -450,8 +546,8 @@ class V2Vft(nn.Module):
             x = self.videoConv(x)
             x = x.transpose(1, 2).transpose(0, 1)
             x = self.EncoderPositionalEncoding(x)#.permute(1,0,2)
-
         x = self.videoEncoder(x, src_key_padding_mask=mask)
+        # T*B*D
         vsr = self.jointOutputConv(x.permute(1,2,0))
         vsr = F.log_softmax(vsr.permute(2,0,1), dim=-1)
         targetinBatch = self.embed(targetinBatch.transpose(0, 1))
@@ -463,6 +559,125 @@ class V2Vft(nn.Module):
         att = att.permute(0,2,1) # B*T*V
 
         return inputLenBatch, (vsr, att)
+
+
+    def training_step(self, batch, batch_idx):
+        inputBatch, targetinBatch, targetoutBatch, targetLenBatch = batch
+        Alpha = self.alpha
+        inputBatch = (None, None, inputBatch[2].float(), inputBatch[3].int())
+
+        targetinBatch = targetinBatch.int()
+        targetoutBatch = targetoutBatch.int()
+        targetLenBatch = targetLenBatch.int()
+        targetMask = torch.zeros_like(targetoutBatch, device=self.device)
+        targetMask[(torch.arange(targetMask.shape[0]), targetLenBatch.long() - 1)] = 1
+        targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        concatTargetoutBatch = targetoutBatch[~targetMask]
+
+        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), targetinBatch, 1)
+        with torch.backends.cudnn.flags(enabled=False):
+            ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
+            celoss = self.CELossFunction[0](outputBatch[1], targetoutBatch.long())
+            loss = Alpha * ctcloss + (1 - Alpha) * celoss
+        self.log("info/train_ctcloss", ctcloss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("info/train_celoss", celoss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("info/train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0].detach(), inputLenBatch, self.eosIdx)
+        c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
+        self.log("CER/train_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.spaceIdx)
+        self.log("info/train_WER", w_edits / w_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        inputBatch, targetinBatch, targetoutBatch, targetLenBatch = batch
+        Alpha = self.alpha
+
+        inputBatch = (None, None, inputBatch[2].float(), inputBatch[3].int())
+
+        targetinBatch = targetinBatch.int()
+        targetoutBatch = targetoutBatch.int()
+        targetLenBatch = targetLenBatch.int()
+        targetMask = torch.zeros_like(targetoutBatch, device=self.device)
+        targetMask[(torch.arange(targetMask.shape[0]), targetLenBatch.long() - 1)] = 1
+        targetMask = (1 - targetMask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        concatTargetoutBatch = targetoutBatch[~targetMask]
+
+        # inputBatch: b*f*1*112*112; targetinBatch: b*L; targetLenBatch: b
+        inputLenBatch, outputBatch = self(inputBatch, targetLenBatch.long(), targetinBatch, 0)
+        with torch.backends.cudnn.flags(enabled=False):
+            ctcloss = self.CTCLossFunction[0](outputBatch[0], concatTargetoutBatch, inputLenBatch, targetLenBatch)
+            celoss = self.CELossFunction[0](outputBatch[1], targetoutBatch.long())
+            loss = Alpha * ctcloss + (1 - Alpha) * celoss
+        self.log("info/val_ctcloss", ctcloss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("info/val_celoss", celoss, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("info/val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+
+        predictionBatch, predictionLenBatch = ctc_greedy_decode(outputBatch[0], inputLenBatch, self.eosIdx)
+        c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
+        self.log("CER/val_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.spaceIdx)
+        self.log("info/val_WER", w_edits / w_count, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+
+        predictionBatch, predictionLenBatch = teacher_forcing_attention_decode(outputBatch[1], self.eosIdx)
+        c_edits, c_count = compute_error_ch(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch)
+        self.log("CER/val_TF_CER", c_edits / c_count, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        w_edits, w_count = compute_error_word(predictionBatch, concatTargetoutBatch, predictionLenBatch, targetLenBatch, self.spaceIdx)
+        self.log("info/val_TF_WER", w_edits / w_count, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+
+    def get_progress_bar_dict(self):
+        items = super().get_progress_bar_dict()
+        items.pop("v_num", None)
+        return items
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=args["INIT_LR"], betas=(args["MOMENTUM1"], args["MOMENTUM2"]))
+        scheduler_reduce = ReduceLROnPlateau(optimizer, mode="min", factor=args["LR_SCHEDULER_FACTOR"], patience=args["LR_SCHEDULER_WAIT"],
+                                             threshold=args["LR_SCHEDULER_THRESH"], threshold_mode="abs", min_lr=args["FINAL_LR"], verbose=True)
+        if args["LRW_WARMUP_PERIOD"] > 0:
+            scheduler = WarmupLR(scheduler_reduce, init_lr=args["FINAL_LR"], num_warmup=args["LRS2_WARMUP_PERIOD"], warmup_strategy='cos')
+            scheduler.step(1)
+        else:
+            scheduler = scheduler_reduce
+
+        optim_dict = {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,  # The LR scheduler instance (required)
+                'interval': 'epoch',  # The unit of the scheduler's step size
+                'frequency': 1,  # The frequency of the scheduler
+                'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler
+                'monitor': 'info/val_TF_WER',
+                'strict': True,  # Whether to crash the training if `monitor` is not found
+                'name': None,  # Custom name for LearningRateMonitor to use
+            }
+        }
+        return optim_dict
+
+    def makePadding(self, videoBatch, vidLen):
+        device = videoBatch[0].device
+        vidPadding = torch.zeros(len(videoBatch)).long().to(device)
+
+        mask = (vidPadding + vidLen) > self.reqInpLen
+        vidPadding = mask * vidPadding + (~mask) * (self.reqInpLen - vidLen)
+
+        vidLeftPadding = torch.floor(torch.div(vidPadding, 2)).int()
+        vidRightPadding = torch.ceil(torch.div(vidPadding, 2)).int()
+
+        for i, _ in enumerate(videoBatch):
+            pad = nn.ReplicationPad2d(padding=(0, 0, vidLeftPadding[i], vidRightPadding[i]))
+            videoBatch[i] = pad(videoBatch[i].unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
+
+        videoBatch = pad_sequence(videoBatch, batch_first=True)
+        inputLenBatch = (vidLen + vidPadding).long()
+        mask = self.makeMaskfromLength(videoBatch.shape[:-1], inputLenBatch, device)
+        return videoBatch, inputLenBatch, mask
+    
+    def makeMaskfromLength(self, maskShape, maskLength, maskDevice):
+        mask = torch.zeros(maskShape, device=maskDevice)
+        mask[(torch.arange(mask.shape[0]), maskLength - 1)] = 1
+        mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
+        return mask
 
     def inference(self, inputBatch, Lambda, beamWidth, eosIx, blank):
         _, _, source, vidLen = inputBatch
