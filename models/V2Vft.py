@@ -349,7 +349,7 @@ class V2V(pl.LightningModule):
     
     def forward(self, source, frame):
         #source: 16*29*1*112*112
-        features = self.feature_extractor(source) #464*2048
+        features = self.feature_extractor(source, frame) #464*2048
         features = features.view(-1, frame, features.shape[-1]).permute(0, 2, 1) #16*2048*29
         x = self.dropout_feats(features)
         x = self.feature_aggregator(x) #16*512*29

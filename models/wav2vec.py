@@ -94,7 +94,6 @@ class Wav2VecPredictionsModel(nn.Module):
         return negs
 
     def forward(self, x, y):
-
         x = x.unsqueeze(-1) #16*512*29*1
         x = self.project_to_steps(x)  # BxCxTxS 16*2048*29*3
         x = self.dropout(x)

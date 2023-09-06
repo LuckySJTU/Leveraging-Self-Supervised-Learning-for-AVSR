@@ -18,7 +18,7 @@ from torch_warmup_lr import WarmupLR
 
 from config import args
 from trainFrontend.dataset import LRW
-from data.utils import collate_fn
+from trainFrontend.datautils import collate_fn
 from models.V2Vft import V2V
 
 

@@ -25,7 +25,7 @@ def collate_fn(dataBatch):
     """
     Collate function definition used in Dataloaders.
     """
-    vis_seq_list = torch.cat([data[0] for data in dataBatch])
+    vis_seq_list = torch.cat([data[0].unsqueeze(dim=0) for data in dataBatch])
     wordtargetBatch = torch.cat([data[1] for data in dataBatch])
 
     return vis_seq_list, wordtargetBatch
