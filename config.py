@@ -19,7 +19,7 @@ args["GPU_IDS"] = [0, 1, 2, 3]#,4,5,6,7
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
-args["BATCH_SIZE"] = 8
+args["BATCH_SIZE"] = 32
 args["STEP_SIZE"] = 16384
 args["INIT_LR"] = 1e-3
 
@@ -82,7 +82,7 @@ args["NUM_STEPS"] = 100  # maximum number of steps to train for (early stopping 
 
 # optimizer, scheduler and modality dropping
 args["FINAL_LR"] = 1e-7  # final learning rate for scheduler
-args["LR_SCHEDULER_WAIT"] = 40  # number of steps to wait to lower learning rate
+args["LR_SCHEDULER_WAIT"] = 20  # number of steps to wait to lower learning rate
 args["LR_SCHEDULER_METRICS"] = "WER"
 args["LR_SCHEDULER_FACTOR"] = 0.5  # learning rate decrease factor for scheduler
 args["LR_SCHEDULER_THRESH"] = 0.001  # threshold to check plateau-ing of wer
