@@ -82,7 +82,7 @@ args["NUM_STEPS"] = 100  # maximum number of steps to train for (early stopping 
 
 # optimizer, scheduler and modality dropping
 args["FINAL_LR"] = 1e-7  # final learning rate for scheduler
-args["LR_SCHEDULER_WAIT"] = 20  # number of steps to wait to lower learning rate
+args["LR_SCHEDULER_WAIT"] = 40  # number of steps to wait to lower learning rate
 args["LR_SCHEDULER_METRICS"] = "WER"
 args["LR_SCHEDULER_FACTOR"] = 0.5  # learning rate decrease factor for scheduler
 args["LR_SCHEDULER_THRESH"] = 0.001  # threshold to check plateau-ing of wer

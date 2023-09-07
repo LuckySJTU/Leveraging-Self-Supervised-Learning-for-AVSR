@@ -377,7 +377,7 @@ class V2V(pl.LightningModule):
 
         with torch.backends.cudnn.flags(enabled=False):
             loss = F.binary_cross_entropy_with_logits(
-                    logits, target.float(), reduction="sum"
+                    logits, target.float(), reduction="mean"
                 )
         self.log("info/train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         return loss
@@ -392,7 +392,7 @@ class V2V(pl.LightningModule):
 
         with torch.backends.cudnn.flags(enabled=False):
             loss = F.binary_cross_entropy_with_logits(
-                    logits, target.float(), reduction="sum"
+                    logits, target.float(), reduction="mean"
                 )
         self.log("info/valid_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         return loss
