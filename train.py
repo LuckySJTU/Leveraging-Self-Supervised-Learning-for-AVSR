@@ -62,7 +62,9 @@ def main():
     torch.set_num_threads(args["NUM_CPU_CORE"])
     LRS2Dataloader = LRS2Lightning()
     LRS2Dataloader.setup('fit')
-    model = V2Vft()
+    model = V2Vft(modelPath=args["LRW_PRETRAIN_MODEL_FILE"])
+    if args["LRW_PRETRAIN_MODEL_FILE"] is not None:
+        print(f"Pretrain model loaded from {args['LRW_PRETRAIN_MODEL_FILE']}")
     #     args['dropout_features'], 
     #     args['frontend'], 
     #     args["CHAR_NUM_CLASSES"], 
@@ -75,7 +77,8 @@ def main():
     writer = pl_loggers.TensorBoardLogger(save_dir=args["CODE_DIRECTORY"], name='log', default_hp_metric=False)
     # removing the checkpoints directory if it exists and remaking it
     if os.path.exists(args["CODE_DIRECTORY"] + "checkpoints"):
-        shutil.rmtree(args["CODE_DIRECTORY"] + "checkpoints")
+        # shutil.rmtree(args["CODE_DIRECTORY"] + "checkpoints")
+        print("Path not change!")
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args["CODE_DIRECTORY"] + "checkpoints/models",

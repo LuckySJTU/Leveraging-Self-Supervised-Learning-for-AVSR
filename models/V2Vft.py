@@ -428,7 +428,7 @@ class V2V(pl.LightningModule):
 
 
 class V2Vft(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, modelPath=None):
         # any change should be syned with V2Vft class in models/V2Vft.py
         super(V2Vft, self).__init__()
 
@@ -440,8 +440,14 @@ class V2Vft(pl.LightningModule):
         eosIdx = args["CHAR_TO_INDEX"]["<EOS>"]
         spaceIdx = args["CHAR_TO_INDEX"][" "]
 
-        self.feature_extractor = VisFeatureExtractionModel(frontend)
-        self.dropout_feats = nn.Dropout(p=dropout_features)
+        if modelPath is not None:
+            self.backbone = V2V(dropout_features, frontend).load_state_dict(torch.load(modelPath)['state_dict'])
+            self.backbone.feature_aggregator = nn.Identity()
+            self.backbone.dropout_agg = nn.Identity()
+            self.backbone.wav2vec_predictions = nn.Identity()
+        else:
+            self.feature_extractor = VisFeatureExtractionModel(frontend)
+            self.dropout_feats = nn.Dropout(p=dropout_features)
 
         self.vocab_size = output_size
         
@@ -495,14 +501,20 @@ class V2Vft(pl.LightningModule):
         self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
         self.jointAttentionOutputConv = outputConv("LN", dModel, output_size)
 
+    def load_pretrain(self, modelPath):
+        self.backbone = V2V().load_state_dict(torch.load(modelPath))
+
 
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
         _, _, source, vidLen = source
         frames = source.shape[1]
-        x = self.feature_extractor(source, vidLen)  # (B*N) x D
-        x = self.dropout_feats(x)
-        x = self.backbone.feature_aggregator(x)     # B x D x N
-        x = self.backbone.dropout_agg(x)
+        if not hasattr(self,"backbone"):
+            x = self.feature_extractor(source, vidLen)  # (B*N) x D
+            x = self.dropout_feats(x)
+        else:
+            x = self.backbone.feature_extractor(source, vidLen)     # B x D x N
+            x = self.backbone.dropout_feats(x)
+        
         vsr = None
         att = None
 

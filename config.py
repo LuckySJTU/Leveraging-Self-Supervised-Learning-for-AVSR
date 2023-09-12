@@ -3,7 +3,7 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR_pretrain'#
+args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR_v2vft'#
 args["DATA_DIRECTORY"] = "/home/xcpan/server_1/LRS2/mvlrs_v1"
 args["HDF5_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/LRS2.h5"
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
@@ -48,6 +48,7 @@ args["WAV2VEC_FILE"] = "/home/xcpan/server_1/pretrain_model/wav2vec_vox_new.pt"
 args["TRAIN_LRS2_MODEL_FILE"] = None
 args["TRAINED_AO_FILE"] = None
 args["TRAINED_VO_FILE"] = None
+args["LRW_PRETRAIN_MODEL_FILE"] = "/home/yxwang/LSSLAVSR_pretraincheckpoints/models/pretrain-step_0381-loss_0.089.ckpt"
 
 # Used for evaluation
 args["LAMBDA"] = 0.1
@@ -78,7 +79,7 @@ args["MAIN_REQ_INPUT_LENGTH"] = 80  # minimum input length while training
 
 # training
 args["SEED"] = 19260817  # seed for random number generators (6)
-args["NUM_STEPS"] = 100  # maximum number of steps to train for (early stopping is used)
+args["NUM_STEPS"] = 1000  # maximum number of steps to train for (early stopping is used)
 
 # optimizer, scheduler and modality dropping
 args["FINAL_LR"] = 1e-7  # final learning rate for scheduler
