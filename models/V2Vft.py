@@ -441,7 +441,8 @@ class V2Vft(pl.LightningModule):
         spaceIdx = args["CHAR_TO_INDEX"][" "]
 
         if modelPath is not None:
-            self.backbone = V2V(dropout_features, frontend).load_state_dict(torch.load(modelPath)['state_dict'])
+            self.backbone = V2V(dropout_features, frontend)
+            self.backbone.load_state_dict(torch.load(modelPath)['state_dict'])
             self.backbone.feature_aggregator = nn.Identity()
             self.backbone.dropout_agg = nn.Identity()
             self.backbone.wav2vec_predictions = nn.Identity()
@@ -500,10 +501,6 @@ class V2Vft(pl.LightningModule):
         jointDecoderLayer = nn.TransformerDecoderLayer(d_model=dModel, nhead=8, dim_feedforward=1024, dropout=0.1)
         self.jointAttentionDecoder = nn.TransformerDecoder(jointDecoderLayer, num_layers=6, norm=tx_norm)
         self.jointAttentionOutputConv = outputConv("LN", dModel, output_size)
-
-    def load_pretrain(self, modelPath):
-        self.backbone = V2V().load_state_dict(torch.load(modelPath))
-
 
     def forward(self, source, target_lengths, targetinBatch, teacher_forcing=0):
         _, _, source, vidLen = source
