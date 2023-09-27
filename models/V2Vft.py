@@ -248,7 +248,7 @@ class VisFeatureExtractionModel(nn.Module):
         # x = x.reshape(-1, x.shape[-3], x.shape[-2], x.shape[-1]) #464*64*26*26
 
         mask = torch.zeros(x.shape[:2], device=x.device)
-        mask[(torch.arange(mask.shape[0], device=x.device), x_len - 1)] = 1
+        mask[(torch.arange(mask.shape[0], device=x.device).long(), x_len.long() - 1)] = 1
         mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
         x = x[~mask]
 
@@ -447,10 +447,13 @@ class V2Vft(pl.LightningModule):
             self.backbone.dropout_agg = nn.Identity()
             self.backbone.wav2vec_predictions = nn.Identity()
         else:
-            self.feature_extractor = VisFeatureExtractionModel(frontend)
-            self.dropout_feats = nn.Dropout(p=dropout_features)
+            self.backbone = V2V(dropout_features, frontend)
+            self.backbone.feature_aggregator = nn.Identity()
+            self.backbone.dropout_agg = nn.Identity()
+            self.backbone.wav2vec_predictions = nn.Identity()
 
         self.vocab_size = output_size
+        self.numClasses = output_size
         
         hidden_dim = {
             "resnet18":512,
@@ -691,8 +694,8 @@ class V2Vft(pl.LightningModule):
     def inference(self, inputBatch, Lambda, beamWidth, eosIx, blank):
         _, _, source, vidLen = inputBatch
         # frames = source.shape[1]
-        x = self.feature_extractor(source, vidLen)  # (B*N) x D
-        x = self.dropout_feats(x)
+        x = self.backbone.feature_extractor(source, vidLen)  # (B*N) x D
+        x = self.backbone.dropout_feats(x)
 
         device = source.device
         eosIx = self.eosIdx

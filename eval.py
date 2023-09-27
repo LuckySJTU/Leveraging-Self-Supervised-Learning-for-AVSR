@@ -36,15 +36,7 @@ def main():
         logger.info("\nTrained Model File: %s" % (args["EVAL_LRS2_MODEL_FILE"]))
 
         # declaring the model,loss function and loading the trained model weights
-        model = V2Vft(
-            args['dropout_features'], 
-            args['frontend'], 
-            args["CHAR_NUM_CLASSES"], 
-            args["MAIN_REQ_INPUT_LENGTH"], 
-            args["ALPHA"], 
-            args["CHAR_TO_INDEX"]["<EOS>"],
-            args["CHAR_TO_INDEX"][" "],
-        )
+        model = V2Vft()
         stateDict = torch.load(args["EVAL_LRS2_MODEL_FILE"], map_location=device)['state_dict']
         msg = model.load_state_dict(stateDict, strict=False)
         print(msg)
