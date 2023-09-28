@@ -3,25 +3,25 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = '/home/yxwang/LSSLAVSR_v2vft'#
-args["DATA_DIRECTORY"] = "/home/xcpan/server_1/LRS2/mvlrs_v1"
-args["HDF5_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/LRS2.h5"
+args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_v2vft0927'#
+args["DATA_DIRECTORY"] = "/mnt/data/FLLM/Leveraging"
+args["HDF5_FILE"] = "/mnt/data/FLLM/Leveraging/LRS2.h5"
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
 args["LRW_HDF5_FILE"] = "/home/yxwang/Dataset/LRW/LRW.h5"
-args["NOISE_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/Noise.h5"
-args["HUMAN_NOISE_FILE"] = "/home/xcpan/server_1/LRS2/mvlrs_v1/HumanNoise.h5"
-args["SHAPE_PREDICTOR_FILE"] = "/home/xcpan/server_1/pretrain_model/shape_predictor_68_face_landmarks.dat"
-args["MOCO_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_v2_200ep_pretrain.pth"
+args["NOISE_FILE"] = "/mnt/data/FLLM/Leveraging/Noise.h5"
+args["HUMAN_NOISE_FILE"] = "/mnt/data/FLLM/Leveraging/HumanNoise.h5"
+args["SHAPE_PREDICTOR_FILE"] = "/mnt/data/FLLM/Leveraging/shape_predictor_68_face_landmarks.dat"
+args["MOCO_FILE"] = "/mnt/data/FLLM/Leveraging/moco_v2_200ep_pretrain.pth"
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [0, 1, 2, 3]#,4,5,6,7
+args["GPU_IDS"] = [1, 2, 3,4,5,6,7]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
-args["BATCH_SIZE"] = 12
+args["BATCH_SIZE"] = 6
 args["STEP_SIZE"] = 16384
-args["INIT_LR"] = 1e-4
+args["INIT_LR"] = 1e-5
 
 """
     For LRW
@@ -45,10 +45,10 @@ args["LRS2_WARMUP_PERIOD"] = 80
 
 args["MOCO_FRONTEND_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_frontend.pt"#"/home/yxwang/train-step_0000-Acc_0.000.pt
 args["WAV2VEC_FILE"] = "/home/xcpan/server_1/pretrain_model/wav2vec_vox_new.pt"
-args["TRAIN_LRS2_MODEL_FILE"] = None
+args["TRAIN_LRS2_MODEL_FILE"] = "/root/LSSLAVSR/train-step_0206-wer_0.968.ckpt"
 args["TRAINED_AO_FILE"] = None
 args["TRAINED_VO_FILE"] = None
-args["LRW_PRETRAIN_MODEL_FILE"] = "/home/yxwang/LSSLAVSR_pretraincheckpoints/models/pretrain-step_0381-loss_0.089.ckpt"
+args["LRW_PRETRAIN_MODEL_FILE"] = "/root/LSSL/pretrain-step_0381-loss_0.089.ckpt"
 
 # Used for evaluation
 args["LAMBDA"] = 0.1
@@ -56,7 +56,7 @@ args["BEAM_WIDTH"] = 5
 args["TEST_WITH_NOISE"] = False
 args["TEST_NOISE_SNR_DB"] = 5
 args["DECODE_TYPE"] = "HYBRID"  # HYBRID ATTN TFATTN CTC
-args["EVAL_LRS2_MODEL_FILE"] = "/home/yxwang/LSSLAVSR_resnet50checkpoints/models/train-step_0999-wer_0.859.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt
+args["EVAL_LRS2_MODEL_FILE"] = "/mnt/data/FLLM/yxwang/LSSL_v2vft0924checkpoints/models/train-step_0993-wer_0.978.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt
 
 """
     For me

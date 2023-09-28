@@ -73,6 +73,8 @@ def main():
     #     args["CHAR_TO_INDEX"]["<EOS>"],
     #     args["CHAR_TO_INDEX"][" "],
     # )
+    if args["TRAIN_LRS2_MODEL_FILE"] is not None:
+        model.load_state_dict(torch.load(args['TRAIN_LRS2_MODEL_FILE'])['state_dict'])
 
     writer = pl_loggers.TensorBoardLogger(save_dir=args["CODE_DIRECTORY"], name='log', default_hp_metric=False)
     # removing the checkpoints directory if it exists and remaking it
