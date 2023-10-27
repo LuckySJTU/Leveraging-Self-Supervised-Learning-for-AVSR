@@ -248,7 +248,7 @@ class VisFeatureExtractionModel(nn.Module):
         # x = x.reshape(-1, x.shape[-3], x.shape[-2], x.shape[-1]) #464*64*26*26
 
         mask = torch.zeros(x.shape[:2], device=x.device)
-        mask[(torch.arange(mask.shape[0], device=x.device).long(), x_len.long() - 1)] = 1
+        mask[(torch.arange(mask.shape[0], device=x.device).long(), x_len - 1)] = 1
         mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
         x = x[~mask]
 
