@@ -23,6 +23,14 @@ from trainFrontend.datautils import collate_fn
 from models.V2Vft import V2V
 
 
+def collate_fn(dataBatch):
+    frame = min([len(data[0]) for data in dataBatch])
+    vis_seq_list = torch.cat([data[0][:frame].unsqueeze(dim=0) for data in dataBatch])
+    vis_len = torch.tensor([frame for _ in dataBatch])
+
+    return vis_seq_list, vis_len
+
+
 class LRWLightning(pl.LightningDataModule):
     def __init__(self):
         super(LRWLightning, self).__init__()
