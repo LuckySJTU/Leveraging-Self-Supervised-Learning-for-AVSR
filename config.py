@@ -3,9 +3,9 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_v2vft0927'#
+args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_voxpre1027'#
 args["DATA_DIRECTORY"] = "/mnt/data/FLLM/Leveraging"
-args["HDF5_FILE"] = "/mnt/data/FLLM/Leveraging/LRS2.h5"
+args["HDF5_FILE"] = "/mnt/data/FLLM/voxceleb2/voxceleb2.h5"
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
 args["LRW_HDF5_FILE"] = "/home/yxwang/Dataset/LRW/LRW.h5"
 args["NOISE_FILE"] = "/mnt/data/FLLM/Leveraging/Noise.h5"
@@ -15,13 +15,13 @@ args["MOCO_FILE"] = "/mnt/data/FLLM/Leveraging/moco_v2_200ep_pretrain.pth"
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [1, 2, 3,4,5,6,7]#
+args["GPU_IDS"] = [0,1, 2, 3,4,5,6,7]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
-args["BATCH_SIZE"] = 6
+args["BATCH_SIZE"] = 2
 args["STEP_SIZE"] = 16384
-args["INIT_LR"] = 1e-5
+args["INIT_LR"] = 1e-4
 
 """
     For LRW
@@ -79,10 +79,10 @@ args["MAIN_REQ_INPUT_LENGTH"] = 80  # minimum input length while training
 
 # training
 args["SEED"] = 19260817  # seed for random number generators (6)
-args["NUM_STEPS"] = 1000  # maximum number of steps to train for (early stopping is used)
+args["NUM_STEPS"] = 2000  # maximum number of steps to train for (early stopping is used)
 
 # optimizer, scheduler and modality dropping
-args["FINAL_LR"] = 1e-7  # final learning rate for scheduler
+args["FINAL_LR"] = 1e-9  # final learning rate for scheduler
 args["LR_SCHEDULER_WAIT"] = 40  # number of steps to wait to lower learning rate
 args["LR_SCHEDULER_METRICS"] = "WER"
 args["LR_SCHEDULER_FACTOR"] = 0.5  # learning rate decrease factor for scheduler

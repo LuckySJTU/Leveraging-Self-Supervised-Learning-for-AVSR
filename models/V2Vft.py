@@ -309,7 +309,7 @@ class V2V(pl.LightningModule):
         agg_dim = 512
         embed_dim = hidden_dim[frontend]
         prediction_steps = 3
-        num_negatives = 3 # default 5
+        num_negatives = 10 # default 5
         cross_sample_negatives = 0
         sample_distance = None
         dropout = 0.1 # default 0

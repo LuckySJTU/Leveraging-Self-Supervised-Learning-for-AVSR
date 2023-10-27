@@ -18,6 +18,7 @@ from torch_warmup_lr import WarmupLR
 
 from config import args
 from trainFrontend.dataset import LRW
+from data.voxceleb2_dataset import Voxceleb2
 from trainFrontend.datautils import collate_fn
 from models.V2Vft import V2V
 
@@ -43,13 +44,45 @@ class LRWLightning(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.testData, batch_size=args["BATCH_SIZE"], collate_fn=collate_fn, shuffle=False, **self.kwargs)
+    
+
+class Voxceleb2Lightning(pl.LightningDataModule):
+    def __init__(self):
+        super(Voxceleb2Lightning, self).__init__()
+        self.kwargs = {"num_workers": args["NUM_WORKERS"], "persistent_workers": True if args["NUM_WORKERS"] > 0 else False, "pin_memory": True}
+
+    def setup(self, stage):
+        if stage == "fit" or stage is None:
+            noiseParams = {"noiseFile": args["NOISE_FILE"], "noiseProb": args["NOISE_PROBABILITY"], "noiseSNR": args["NOISE_SNR_DB"]}
+            self.trainData = Voxceleb2(args['MODAL'], "train", args["DATA_DIRECTORY"], args["HDF5_FILE"], args["CHAR_TO_INDEX"], args["STEP_SIZE"],
+                                  True, noiseParams)
+
+            noiseParams = {"noiseFile": args["NOISE_FILE"], "noiseProb": 0, "noiseSNR": args["NOISE_SNR_DB"]}
+            self.valData = Voxceleb2(args['MODAL'], "val", args["DATA_DIRECTORY"], args["HDF5_FILE"], args["CHAR_TO_INDEX"], args["STEP_SIZE"], False,
+                                noiseParams)
+
+        if stage == "test" or stage is None:
+            noiseParams = {"noiseFile": args["NOISE_FILE"], "noiseProb": 0, "noiseSNR": args["NOISE_SNR_DB"]}
+            self.testData = Voxceleb2(args['MODAL'], "test", args["DATA_DIRECTORY"], args["HDF5_FILE"], args["CHAR_TO_INDEX"], args["STEP_SIZE"], False,
+                                 noiseParams)
+
+    def train_dataloader(self):
+        return DataLoader(self.trainData, batch_size=args["BATCH_SIZE"], collate_fn=collate_fn, shuffle=True, **self.kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(self.valData, batch_size=args["BATCH_SIZE"], collate_fn=collate_fn, shuffle=False, **self.kwargs)
+
+    def test_dataloader(self):
+        return DataLoader(self.testData, batch_size=args["BATCH_SIZE"], collate_fn=collate_fn, shuffle=False, **self.kwargs)
 
 
 def main():
     pl.seed_everything(args["SEED"])
     torch.set_num_threads(args["NUM_CPU_CORE"])
-    LRWDataloader = LRWLightning()
-    LRWDataloader.setup('fit')
+    # LRWDataloader = LRWLightning()
+    # LRWDataloader.setup('fit')
+    Voxceleb2DataLoader = Voxceleb2Lightning()
+    Voxceleb2DataLoader.setup('fit')
     model = V2V(
         args['dropout_features'], 
         args['frontend'], 
@@ -58,12 +91,12 @@ def main():
     writer = pl_loggers.TensorBoardLogger(save_dir=args["CODE_DIRECTORY"], name='log', default_hp_metric=False)
     # removing the checkpoints directory if it exists and remaking it
     if os.path.exists(args["CODE_DIRECTORY"] + "checkpoints"):
-        shutil.rmtree(args["CODE_DIRECTORY"] + "checkpoints")
+        if input("CODE_DIRECTORY exists, whether overwrite ? y/[n]") == 'y':
+            shutil.rmtree(args["CODE_DIRECTORY"] + "checkpoints")
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args["CODE_DIRECTORY"] + "checkpoints/models",
-        filename=
-        "pretrain-step_{epoch:04d}-loss_{info/valid_loss:.3f}",
+        filename="pretrain-step_{epoch:04d}-loss_{info/valid_loss:.3f}",
         monitor='info/valid_loss',
         every_n_epochs=1,
         every_n_train_steps=0,
@@ -87,7 +120,7 @@ def main():
         #fast_dev_run=True,
         plugins=DDPPlugin(find_unused_parameters=False), #if args["MODAL"] == "VO" else True
     )
-    trainer.fit(model, LRWDataloader)
+    trainer.fit(model, Voxceleb2DataLoader)
     return
 
 
