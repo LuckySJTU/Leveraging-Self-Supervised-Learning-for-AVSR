@@ -3,7 +3,7 @@ args = dict()
     =====Directory=====
 """
 # define the "relative directory" relative to the project root dir
-args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_voxpre1027'#
+args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_voxpre1031'#
 args["DATA_DIRECTORY"] = "/mnt/data/FLLM/Leveraging"
 args["HDF5_FILE"] = "/mnt/data/FLLM/voxceleb2/voxceleb2.h5"
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
