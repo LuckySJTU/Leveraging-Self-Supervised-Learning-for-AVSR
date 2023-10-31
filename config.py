@@ -19,8 +19,8 @@ args["GPU_IDS"] = [0,1, 2, 3,4,5,6,7]#
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4
-args["BATCH_SIZE"] = 1
-args["STEP_SIZE"] = 8192 #16384
+args["BATCH_SIZE"] = 2
+args["STEP_SIZE"] = 16384
 args["INIT_LR"] = 1e-4
 
 """
