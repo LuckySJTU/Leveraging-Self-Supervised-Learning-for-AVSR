@@ -5,7 +5,7 @@ args = dict()
 # define the "relative directory" relative to the project root dir
 args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_voxpre1031'#
 args["DATA_DIRECTORY"] = "/mnt/data/FLLM/Leveraging"
-args["HDF5_FILE"] = "/mnt/data/FLLM/LRS2/LRS2.h5" # remember to change when use different dataset
+args["HDF5_FILE"] = "/mnt/data/FLLM/voxceleb2/voxceleb2.h5" # remember to change when use different dataset
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
 args["LRW_HDF5_FILE"] = "/home/yxwang/Dataset/LRW/LRW.h5"
 args["NOISE_FILE"] = "/mnt/data/FLLM/Leveraging/Noise.h5"
@@ -15,7 +15,7 @@ args["MOCO_FILE"] = "/mnt/data/FLLM/Leveraging/moco_v2_200ep_pretrain.pth"
 """
     =====Experimental Setting=====
 """
-args["GPU_IDS"] = [0,1, 2, 3,4,5,6,7]#
+args["GPU_IDS"] = [0,1, 2, 3]#,4,5,6,7
 args["GPU_ID"] = 0
 args["NUM_WORKERS"] = 4
 args["NUM_CPU_CORE"] = 4

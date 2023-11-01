@@ -248,7 +248,7 @@ class VisFeatureExtractionModel(nn.Module):
         # x = x.reshape(-1, x.shape[-3], x.shape[-2], x.shape[-1]) #464*64*26*26
 
         mask = torch.zeros(x.shape[:2], device=x.device)
-        mask[(torch.arange(mask.shape[0], device=x.device).long(), x_len - 1)] = 1
+        mask[(torch.arange(mask.shape[0], device=x.device).long(), x_len.long() - 1)] = 1
         mask = (1 - mask.flip([-1]).cumsum(-1).flip([-1])).bool()
         x = x[~mask]
 
@@ -350,7 +350,7 @@ class V2V(pl.LightningModule):
     def forward(self, source, frame):
         #source: 16*29*1*112*112
         features = self.feature_extractor(source, frame) #464*2048
-        features = features.view(-1, frame, features.shape[-1]).permute(0, 2, 1) #16*2048*29
+        features = features.view(-1, frame[0], features.shape[-1]).permute(0, 2, 1) #16*2048*29
         x = self.dropout_feats(features)
         x = self.feature_aggregator(x) #16*512*29
         x = self.dropout_agg(x)
@@ -368,11 +368,11 @@ class V2V(pl.LightningModule):
         return logits, targets
     
     def training_step(self, batch, batch_idx):
-        inp, trgt = batch
+        inp, frames = batch
 
         inp = inp.float()
-        frame = inp.shape[1]
-        logits, targets = self(inp, frame)
+        # frame = inp.shape[1]
+        logits, targets = self(inp, frames)
         target = targets.contiguous()
 
         with torch.backends.cudnn.flags(enabled=False):
@@ -383,11 +383,11 @@ class V2V(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
-        inp, trgt = batch
+        inp, frames = batch
 
         inp = inp.float()
-        frame = inp.shape[1]
-        logits, targets = self(inp, frame)
+        # frame = inp.shape[1]
+        logits, targets = self(inp, frames)
         target = targets.contiguous()
 
         with torch.backends.cudnn.flags(enabled=False):
