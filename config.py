@@ -5,7 +5,7 @@ args = dict()
 # define the "relative directory" relative to the project root dir
 args["CODE_DIRECTORY"] = '/mnt/data/FLLM/yxwang/LSSL_voxpre1031'#
 args["DATA_DIRECTORY"] = "/mnt/data/FLLM/Leveraging"
-args["HDF5_FILE"] = "/mnt/data/FLLM/voxceleb2/voxceleb2.h5"
+args["HDF5_FILE"] = "/mnt/data/FLLM/LRS2/LRS2.h5" # remember to change when use different dataset
 args["LRW_DATA_DIRECTORY"] = "/home/xcpan/server_1/LRW/lipread_mp4"
 args["LRW_HDF5_FILE"] = "/home/yxwang/Dataset/LRW/LRW.h5"
 args["NOISE_FILE"] = "/mnt/data/FLLM/Leveraging/Noise.h5"
@@ -45,10 +45,10 @@ args["LRS2_WARMUP_PERIOD"] = 80
 
 args["MOCO_FRONTEND_FILE"] = "/home/xcpan/server_1/pretrain_model/moco_frontend.pt"#"/home/yxwang/train-step_0000-Acc_0.000.pt
 args["WAV2VEC_FILE"] = "/home/xcpan/server_1/pretrain_model/wav2vec_vox_new.pt"
-args["TRAIN_LRS2_MODEL_FILE"] = "/root/LSSLAVSR/train-step_0206-wer_0.968.ckpt"
+args["TRAIN_LRS2_MODEL_FILE"] = None #"/root/LSSLAVSR/train-step_0206-wer_0.968.ckpt" used for continue training
 args["TRAINED_AO_FILE"] = None
 args["TRAINED_VO_FILE"] = None
-args["LRW_PRETRAIN_MODEL_FILE"] = "/root/LSSL/pretrain-step_0381-loss_0.089.ckpt"
+args["LRW_PRETRAIN_MODEL_FILE"] = "/mnt/data/FLLM/yxwang/LSSL_voxpre1031checkpoints/models/pretrain-step_0148-loss_0.029.ckpt" #"/root/LSSL/pretrain-step_0381-loss_0.089.ckpt" # used for finetuning
 
 # Used for evaluation
 args["LAMBDA"] = 0.1
@@ -56,7 +56,7 @@ args["BEAM_WIDTH"] = 5
 args["TEST_WITH_NOISE"] = False
 args["TEST_NOISE_SNR_DB"] = 5
 args["DECODE_TYPE"] = "HYBRID"  # HYBRID ATTN TFATTN CTC
-args["EVAL_LRS2_MODEL_FILE"] = "/mnt/data/FLLM/yxwang/LSSL_v2vft0924checkpoints/models/train-step_0993-wer_0.978.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt
+args["EVAL_LRS2_MODEL_FILE"] = "/mnt/data/FLLM/yxwang/LSSL_v2vft0924checkpoints/models/train-step_0993-wer_0.978.ckpt"#/home/yxwang/train-step_0262-wer_0.893.ckpt used for evaluation
 
 """
     For me

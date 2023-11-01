@@ -659,7 +659,7 @@ class V2Vft(pl.LightningModule):
                 'interval': 'epoch',  # The unit of the scheduler's step size
                 'frequency': 1,  # The frequency of the scheduler
                 'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler
-                'monitor': 'info/val_TF_WER',
+                'monitor': 'CER/val_CER',
                 'strict': True,  # Whether to crash the training if `monitor` is not found
                 'name': None,  # Custom name for LearningRateMonitor to use
             }
