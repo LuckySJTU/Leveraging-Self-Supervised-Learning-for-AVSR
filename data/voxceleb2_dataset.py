@@ -34,13 +34,14 @@ class Voxceleb2(Dataset):
             self.open_h5()
 
         if self.dataset == "train":
-            # index goes from 0 to stepSize-1
-            # dividing the dataset into partitions of size equal to stepSize and selecting a random partition
-            # fetch the sample at position 'index' in this randomly selected partition
-            base = self.stepSize * np.arange(int(1091721 / self.stepSize) + 1)
-            ixs = base + index
-            ixs = ixs[ixs < 1091721]
-            index = ixs[0] if len(ixs) == 1 else np.random.choice(ixs)
+            # # index goes from 0 to stepSize-1
+            # # dividing the dataset into partitions of size equal to stepSize and selecting a random partition
+            # # fetch the sample at position 'index' in this randomly selected partition
+            # base = self.stepSize * np.arange(int(1091721 / self.stepSize) + 1)
+            # ixs = base + index
+            # ixs = ixs[ixs < 1091721]
+            # index = ixs[0] if len(ixs) == 1 else np.random.choice(ixs)
+            pass
         if self.dataset == "val":
             index += 1091721
         elif self.dataset == "test":
@@ -56,6 +57,6 @@ class Voxceleb2(Dataset):
         # each iteration covers only a random subset of all the training samples whose size is given by the step size
         # this is done only for the pretrain set, while the whole val/test set is considered
         if self.dataset == "train":
-            return self.stepSize
+            return 1091721
         else:
             return 36237
